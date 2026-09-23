@@ -1,5 +1,23 @@
 # Validation record
 
+## Canonical Memory Ledger contract — 2026-09-23
+
+Environment: Swift 6.2.1 on Linux x86_64.
+
+- Added provider-independent `MemoryRecord` with our own stable UUID, exact `TenantContext`, memory scope, source-backed/derived classification, portable JSON content, source evidence, derived-memory references, confidence, private visibility, lifecycle state, supersession history, and created/updated timestamps.
+- Added validated source references with source type, source locator, and source timestamp.
+- Added custom decoding so malformed wire data cannot bypass confidence, lifecycle, scope, source-reference, self-reference, duplicate-reference, or timestamp invariants.
+- Added tenant-partitioned `InMemoryMemoryLedger` reference implementation. User A and User B may even have the same canonical UUID without colliding because the principal partition is selected before lookup/query.
+- Derived memories can reference only canonical memories already present inside the same tenant partition.
+- Supersession is atomic: normal insert cannot create a half-supersession; replacement must name existing active memories in the same scope; historical records cannot be silently re-parented; and supersession timestamps cannot move history backward.
+- Active queries hide superseded facts by default while historical queries can recover the full chain.
+- Added provider mappings outside canonical `MemoryRecord`. One canonical memory can map to Supermemory and Zep simultaneously; provider names are normalized; one provider external ID cannot identify two canonical memories in the same principal partition; the same external ID may exist safely in another tenant partition.
+- Provider mappings may retain provider metadata without making the provider ID part of canonical memory identity.
+- Added versioned `PortableMemoryExport` containing canonical history and provider mappings only for the requested principal.
+- Focused Swift package using the production Memory Ledger contract and equivalent invariant tests: **18 tests passed, 0 failures**.
+
+This milestone is deliberately not marked as the finished production Memory Ledger: the implementation is still in-memory. Durable database persistence, database-level row isolation, tombstone/delete semantics, provider import/migration execution, and production backup/recovery remain pending.
+
 ## Context service + compiler — 2026-09-23
 
 Environment: Swift 6.2.1 on Linux x86_64.
