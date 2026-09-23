@@ -6,7 +6,7 @@ import Testing
     let interfaceID = UUID()
     let phoneID = UUID()
     let observed = Date(timeIntervalSince1970: 1_000)
-    let state = InterfaceContextState(
+    let state = try InterfaceContextState(
         interfaceID: interfaceID,
         kind: .iOSApp,
         originatingDeviceID: phoneID,
@@ -20,36 +20,51 @@ import Testing
     #expect(state.bindings.deviceID == phoneID)
 }
 
-@Test func deviceStateIsEphemeralAndDeviceBound() throws {
-    let tenant = TenantContext(tenantID: UUID(), userID: UUID())
+@Test func glassesViaPhoneRequiresExplicitCompanionDevice() throws {
+    #expect(throws: ContextStateValidationError.missingGlassesCompanion) {
+        _ = try InterfaceContextState(kind: .metaGlassesViaPhone)
+    }
+
+    let companion = UUID()
+    let state = try InterfaceContextState(
+        kind: .metaGlassesViaPhone,
+        companionDeviceID: companion
+    )
+    #expect(state.companionDeviceID == companion)
+}
+
+@Test func deviceStateNormalizesAndBoundsCapabilities() throws {
     let deviceID = UUID()
     let observed = Date(timeIntervalSince1970: 2_000)
-    let state = DeviceContextState(
+    let state = try DeviceContextState(
         deviceID: deviceID,
         online: true,
         lastSeenAt: observed,
-        advertisedCapabilities: ["ui.get_frontmost_app", "ui.get_windows"],
+        advertisedCapabilities: [" ui.get_windows ", "ui.get_windows", "ui.get_frontmost_app"],
         frontmostApp: "VS Code",
         activeProject: "SECND",
         observedAt: observed
     )
-    let provenance = try ContextProvenance(origin: .applicationAdapter, trust: .systemState)
-    let item = try state.contextItem(tenant: tenant, provenance: provenance)
 
-    #expect(item.scope == .device(deviceID))
-    #expect(item.freshness.classification == .ephemeral)
-    #expect(item.bindings.deviceID == deviceID)
-    #expect(item.provenance.trust == .systemState)
+    #expect(state.advertisedCapabilities == ["ui.get_frontmost_app", "ui.get_windows"])
+    #expect(state.contextScope == .device(deviceID))
+    #expect(state.freshnessClass == .ephemeral)
 
-    let decoded = try item.value.decode(DeviceContextState.self)
-    #expect(decoded == state)
+    #expect(throws: ContextStateValidationError.invalidCapabilityName) {
+        _ = try DeviceContextState(
+            deviceID: deviceID,
+            online: true,
+            lastSeenAt: observed,
+            advertisedCapabilities: ["   "]
+        )
+    }
 }
 
-@Test func taskStateRemainsStructuredInsteadOfConversationText() throws {
+@Test func taskStateRemainsStructuredAndBounded() throws {
     let taskID = UUID()
     let sessionID = UUID()
     let observed = Date(timeIntervalSince1970: 3_000)
-    let state = TaskContextState(
+    let state = try TaskContextState(
         taskID: taskID,
         sessionID: sessionID,
         goal: "Diagnose backend",
@@ -65,9 +80,16 @@ import Testing
 
     #expect(state.contextScope == .task(taskID))
     #expect(state.bindings.sessionID == sessionID)
-    #expect(state.bindings.taskID == taskID)
     #expect(state.knownFacts["backend_running"] == .bool(false))
-    #expect(state.nextCandidates == ["inspect_env", "inspect_config", "ask_user"])
+
+    #expect(throws: ContextStateValidationError.invalidFactKey) {
+        _ = try TaskContextState(
+            taskID: taskID,
+            sessionID: sessionID,
+            goal: "valid",
+            knownFacts: ["   ": .string("bad")]
+        )
+    }
 }
 
 @Test func typedStateCanBeStoredOnlyInsideItsTenantPartition() async throws {
@@ -75,9 +97,10 @@ import Testing
     let other = TenantContext(tenantID: owner.tenantID, userID: UUID())
     let observed = Date(timeIntervalSince1970: 4_000)
     let store = InMemoryContextService()
-    let state = SessionContextState(
+    let state = try SessionContextState(
         sessionID: UUID(),
         currentGoal: "Debug SECND",
+        summary: "Backend investigation in progress",
         observedAt: observed
     )
     let provenance = try ContextProvenance(origin: .system, trust: .systemState)
@@ -100,7 +123,7 @@ import Testing
     #expect(try ownerItems[0].value.decode(SessionContextState.self) == state)
 }
 
-@Test func agentSessionBuildsSessionContextWithoutChangingRoutingState() throws {
+@Test func agentSessionBuildsValidatedSessionContextWithoutChangingRoutingState() throws {
     let sessionID = UUID()
     let activeDevice = UUID()
     let taskID = UUID()
@@ -112,8 +135,9 @@ import Testing
         allowBoundedReadDeviceSelection: true
     )
 
-    let state = session.contextState(
+    let state = try session.contextState(
         currentGoal: "Inspect current project",
+        summary: "Working in SECND",
         currentTaskID: taskID,
         interfaceID: interfaceID,
         observedAt: observed
@@ -125,4 +149,29 @@ import Testing
     #expect(state.interfaceID == interfaceID)
     #expect(state.bindings.sessionID == sessionID)
     #expect(state.bindings.deviceID == activeDevice)
+}
+
+@Test func sessionContextRejectsOversizedAndDuplicateState() throws {
+    #expect(throws: ContextStateValidationError.textTooLong("currentGoal")) {
+        _ = try SessionContextState(
+            sessionID: UUID(),
+            currentGoal: String(repeating: "x", count: 4_097)
+        )
+    }
+    let job = UUID()
+    #expect(throws: ContextStateValidationError.duplicateJobID) {
+        _ = try SessionContextState(sessionID: UUID(), activeJobIDs: [job, job])
+    }
+}
+
+@Test func typedWireDecodingReRunsValidation() throws {
+    let invalidDevice = Data(#"{"deviceID":"00000000-0000-0000-0000-000000000001","online":true,"lastSeenAt":0,"advertisedCapabilities":["   "],"observedAt":0}"#.utf8)
+    #expect(throws: ContextStateValidationError.invalidCapabilityName) {
+        _ = try JSONDecoder().decode(DeviceContextState.self, from: invalidDevice)
+    }
+
+    let invalidSession = Data(#"{"sessionID":"00000000-0000-0000-0000-000000000001","activeJobIDs":[],"currentGoal":"   ","observedAt":0}"#.utf8)
+    #expect(throws: ContextStateValidationError.emptyText("currentGoal")) {
+        _ = try JSONDecoder().decode(SessionContextState.self, from: invalidSession)
+    }
 }
