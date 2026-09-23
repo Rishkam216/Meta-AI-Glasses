@@ -9,6 +9,7 @@ public enum ContextConsumerKind: String, Codable, Sendable, Hashable {
 public enum ContextCompilationError: Error, Sendable, Equatable {
     case invalidMaxItems
     case invalidMaxBytes
+    case invalidMaxRefreshItems
 }
 
 public struct ContextCompilationRequest: Sendable, Equatable {
@@ -19,6 +20,8 @@ public struct ContextCompilationRequest: Sendable, Equatable {
     public let requestedKeys: Set<String>?
     public let maxItems: Int
     public let maxBytes: Int
+    public let refreshStaleEphemeral: Bool
+    public let maxRefreshItems: Int
 
     public init(consumer: ContextConsumerKind,
                 sessionID: UUID? = nil,
@@ -26,9 +29,14 @@ public struct ContextCompilationRequest: Sendable, Equatable {
                 taskID: UUID? = nil,
                 requestedKeys: Set<String>? = nil,
                 maxItems: Int = 32,
-                maxBytes: Int = 32_768) throws {
+                maxBytes: Int = 32_768,
+                refreshStaleEphemeral: Bool = true,
+                maxRefreshItems: Int = 8) throws {
         guard maxItems > 0 else { throw ContextCompilationError.invalidMaxItems }
         guard maxBytes > 0 else { throw ContextCompilationError.invalidMaxBytes }
+        guard (0...32).contains(maxRefreshItems) else {
+            throw ContextCompilationError.invalidMaxRefreshItems
+        }
         self.consumer = consumer
         self.sessionID = sessionID
         self.deviceID = deviceID
@@ -36,6 +44,8 @@ public struct ContextCompilationRequest: Sendable, Equatable {
         self.requestedKeys = requestedKeys
         self.maxItems = maxItems
         self.maxBytes = maxBytes
+        self.refreshStaleEphemeral = refreshStaleEphemeral
+        self.maxRefreshItems = maxRefreshItems
     }
 }
 
@@ -62,23 +72,95 @@ public struct CompiledContextItem: Codable, Sendable, Equatable {
     }
 }
 
+public struct ContextRefreshSummary: Codable, Sendable, Equatable {
+    public let attempted: Int
+    public let refreshed: Int
+    public let unsupported: Int
+    public let failed: Int
+
+    public static let none = ContextRefreshSummary(
+        attempted: 0,
+        refreshed: 0,
+        unsupported: 0,
+        failed: 0
+    )
+}
+
 public struct CompiledContext: Codable, Sendable, Equatable {
     public let consumer: ContextConsumerKind
     public let items: [CompiledContextItem]
     public let omittedItemCount: Int
     public let encodedBytes: Int
+    public let refreshSummary: ContextRefreshSummary
 }
 
 public struct ContextCompiler: Sendable {
     private let store: any ContextStoring
+    private let refresher: (any ContextRefreshing)?
 
-    public init(store: any ContextStoring) {
+    public init(store: any ContextStoring,
+                refresher: (any ContextRefreshing)? = nil) {
         self.store = store
+        self.refresher = refresher
     }
 
     public func compile(_ request: ContextCompilationRequest,
                         as principal: TenantContext,
                         now: Date = Date()) async throws -> CompiledContext {
+        var refreshSummary = ContextRefreshSummary.none
+
+        if request.refreshStaleEphemeral,
+           request.maxRefreshItems > 0,
+           let refresher {
+            let staleQuery = try ContextQuery(
+                keys: request.requestedKeys,
+                freshnessClasses: [.ephemeral],
+                includeStale: true,
+                onlyStale: true,
+                limit: 100
+            )
+            let staleCandidates = await store.query(
+                staleQuery,
+                as: principal,
+                now: now
+            )
+            let relevantStale = staleCandidates
+                .filter { isRelevant($0, to: request) }
+                .prefix(request.maxRefreshItems)
+
+            var attempted = 0
+            var refreshed = 0
+            var unsupported = 0
+            var failed = 0
+
+            for item in relevantStale {
+                attempted += 1
+                do {
+                    switch try await refresher.refresh(item, as: principal, now: now) {
+                    case .refreshed:
+                        refreshed += 1
+                    case .unsupported:
+                        unsupported += 1
+                    }
+                } catch ContextRefreshError.ownershipMismatch {
+                    // A tenant boundary violation is not a recoverable refresh
+                    // failure and must never be hidden by best-effort behavior.
+                    throw ContextRefreshError.ownershipMismatch
+                } catch {
+                    // Refresh is best-effort. Failed stale items remain excluded
+                    // by the fresh query below rather than being trusted anyway.
+                    failed += 1
+                }
+            }
+
+            refreshSummary = ContextRefreshSummary(
+                attempted: attempted,
+                refreshed: refreshed,
+                unsupported: unsupported,
+                failed: failed
+            )
+        }
+
         let query = try ContextQuery(
             keys: request.requestedKeys,
             includeStale: false,
@@ -124,7 +206,8 @@ public struct ContextCompiler: Sendable {
             consumer: request.consumer,
             items: compiled,
             omittedItemCount: omitted,
-            encodedBytes: encodedBytes
+            encodedBytes: encodedBytes,
+            refreshSummary: refreshSummary
         )
     }
 
