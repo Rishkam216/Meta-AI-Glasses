@@ -3,18 +3,20 @@
 Native Mac runtime for a provider-, device-, and interface-neutral personal agent.
 The user's handoff is authoritative; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## First milestone
+## Current milestone
 
 - Swift 6 package, macOS 14+ native menu-bar app; no third-party dependencies.
 - Typed tool protocol, JSON result/error contract, runtime capability catalog.
-- Read-only policy; all non-read tools are refused until approval handling exists.
+- Ephemeral approval foundation for future mutating tools: exact tool/arguments,
+  device + session binding, short expiry, one-time use, and replay rejection.
+- The Mac app still wires `DenyAllApprovals`, so no non-read tool can execute yet.
 - Permission preflight, explicit user-initiated Accessibility request.
 - Metadata-only JSONL audit log; failed initial audit prevents execution.
-- One real tool: `ui.get_frontmost_app`, using `NSWorkspace`.
+- One real native tool: `ui.get_frontmost_app`, using `NSWorkspace`.
 
 No model, voice, shell, file editing, network listener, cloud gateway, or glasses
 integration is implemented. Unimplemented tools are absent from the catalog.
-This is milestone 1 of v0.1, not the full MVP.
+The approval store is infrastructure only; there is not yet a local approval UI.
 
 ## Build on your Mac
 
@@ -53,8 +55,10 @@ implemented; this milestone only generates logs on manual diagnostic calls.
 
 ## Verification
 
-`swift test` on Linux compiles/tests **AgentCore only**. macOS targets are
-deliberately excluded on Linux; passing there does not validate native APIs.
+`swift test` on Linux compiles/tests **AgentCore only**. The current core suite has
+15 passing tests: the original 10 runtime/audit/contract tests plus 5 approval tests.
+macOS targets are deliberately excluded on Linux; passing here does not validate
+AppKit, Accessibility, CoreGraphics, signing, TCC, or real desktop behavior.
 
 On a Mac with an interactive desktop, also run:
 
@@ -63,5 +67,5 @@ RUN_MAC_GUI_TESTS=1 swift test
 ```
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for actual results and the remaining
-native checks. Do not add the next tool until the native app compiles and the
-foreground-app smoke test passes.
+native checks. Do not add a mutating native tool until the macOS build gate passes
+and a trusted local approval UI is wired to the approval store.
