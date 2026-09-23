@@ -1,5 +1,23 @@
 # Validation record
 
+## Context Service — 2026-09-23
+
+Environment: Swift 6.2.1 on Linux x86_64.
+
+- Added provider-neutral `ContextServing` boundary plus actor-backed `ContextService` reference implementation.
+- Storage is partitioned by exact `TenantContext` before lookup/search; it does not scan a global collection and filter ownership afterward.
+- Query data deliberately contains no tenant/user identity field. The principal is supplied separately by trusted caller/session code.
+- Store operations reject principal mismatch.
+- Reads, deletion, clear, count, and search are partition-local.
+- Identical context UUIDs may coexist in different principal partitions without collision or cross-read.
+- Search supports exact scope/key/trust/origin/session/device/task filters, configurable stale-item inclusion, deterministic newest-first ordering, and a hard 100-result maximum.
+- Stale context is excluded by default using the `ContextFreshnessPolicy` supplied to the service.
+- Ran `swift test -j 2` against the isolated production context schema + Context Service test package.
+- **17 tests passed with zero failures**: the 9 context-schema tests plus 8 Context Service tests.
+- Context Service tests include deterministic cross-principal canaries (`ALPHA-PINEAPPLE-7834` / `BETA-ZEBRA-9911`), same-ID partition isolation, wrong-principal write refusal, stale filtering, query bounds, filtering-before-limit behavior, deterministic ordering, and partition-local deletion/clear.
+
+This is application-layer/reference isolation only. It does **not** satisfy the later database-level RLS, provider namespace isolation, tenant-scoped vector retrieval, tenant-scoped distributed cache, or durable persistence checklist items.
+
 ## Tenant + context-item foundation — 2026-09-23
 
 Environment: Swift 6.2.1 on Linux x86_64.
@@ -14,9 +32,7 @@ Environment: Swift 6.2.1 on Linux x86_64.
 - Ran an isolated Swift package containing the production `JSONValue` contract, the committed context foundation, and its tests with `swift test -j 2`.
 - **9 context-foundation tests passed with zero failures**.
 - Tests cover exact tenant/user/account ownership, scope validation, round-trip preservation, cross-principal rejection, explicit and policy-driven staleness, invalid freshness policies, identifier bounds, external-content trust preservation, and malformed decoded-wire-data rejection.
-- This branch is stacked on the previously validated 36-test orchestrator/decision/device/approval AgentCore base. The existing sources were not modified by this slice. A single complete private-repository checkout is not available in the current Linux tool environment, so this entry does not claim a fresh 45-test whole-repository run.
-
-This validates the portable context schema/contract only. It does not yet implement the Context Service, database isolation, automatic stale-context refresh, Context Compiler, memory storage, or model integration.
+- This branch is stacked on the previously validated 36-test orchestrator/decision/device/approval AgentCore base. The existing sources were not modified by this slice. A single complete private-repository checkout is not available in the current Linux tool environment, so this entry does not claim a fresh whole-repository run.
 
 ## Orchestrator + decision engine — 2026-09-23
 
