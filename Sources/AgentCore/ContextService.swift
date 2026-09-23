@@ -14,10 +14,12 @@ public struct ContextQuery: Sendable, Equatable {
     public let keys: Set<String>?
     public let trust: Set<ContextTrustClass>?
     public let origins: Set<ContextOrigin>?
+    public let freshnessClasses: Set<ContextFreshnessClass>?
     public let sessionID: UUID?
     public let deviceID: UUID?
     public let taskID: UUID?
     public let includeStale: Bool
+    public let onlyStale: Bool
     public let limit: Int
 
     public init(exactScope: ContextScope? = nil,
@@ -25,10 +27,12 @@ public struct ContextQuery: Sendable, Equatable {
                 keys: Set<String>? = nil,
                 trust: Set<ContextTrustClass>? = nil,
                 origins: Set<ContextOrigin>? = nil,
+                freshnessClasses: Set<ContextFreshnessClass>? = nil,
                 sessionID: UUID? = nil,
                 deviceID: UUID? = nil,
                 taskID: UUID? = nil,
                 includeStale: Bool = false,
+                onlyStale: Bool = false,
                 limit: Int = 100) throws {
         guard (1...100).contains(limit) else { throw ContextServiceError.invalidLimit }
         if let keys {
@@ -44,10 +48,12 @@ public struct ContextQuery: Sendable, Equatable {
         self.keys = keys
         self.trust = trust
         self.origins = origins
+        self.freshnessClasses = freshnessClasses
         self.sessionID = sessionID
         self.deviceID = deviceID
         self.taskID = taskID
         self.includeStale = includeStale
+        self.onlyStale = onlyStale
         self.limit = limit
     }
 }
@@ -88,8 +94,10 @@ public actor InMemoryContextService: ContextStoring {
         guard let partition = itemsByPrincipal[principal] else { return [] }
 
         let matches = partition.values.filter { item in
-            if !query.includeStale,
-               item.isStale(at: now, policy: freshnessPolicy) {
+            let isStale = item.isStale(at: now, policy: freshnessPolicy)
+            if query.onlyStale {
+                if !isStale { return false }
+            } else if !query.includeStale, isStale {
                 return false
             }
             if let exactScope = query.exactScope, item.scope != exactScope {
@@ -108,6 +116,10 @@ public actor InMemoryContextService: ContextStoring {
             }
             if let origins = query.origins,
                !origins.contains(item.provenance.origin) {
+                return false
+            }
+            if let freshnessClasses = query.freshnessClasses,
+               !freshnessClasses.contains(item.freshness.classification) {
                 return false
             }
             if let sessionID = query.sessionID,
