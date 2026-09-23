@@ -1,5 +1,13 @@
 # Validation record
 
+## Supermemory read-only adapter foundation — 2026-09-23
+
+- Complete package on Swift 6.2.1 / Ubuntu 24.04: `swift test -j 2` — **164 tests passed, 0 failures**.
+- Added 12 tests with parameterized cases covering exact tenant/user/account ownership, bounded injective container tags, case-sensitive Unicode scope encoding, outgoing container/deployment/scope filters, canonical references only, malformed/foreign/duplicate/oversized responses, invalid credentials, sanitized failures and disabled defaults.
+- Local URLProtocol fixtures exercise actual URLSession response handling: HTTP 429, wrong MIME, declared/streamed byte limits, success and cancellation. Fixtures never contact a remote server.
+- Verified MemoryService refuses this adapter because durable revision fencing is unsupported; apply/delete/profile issue no requests. Mandatory service requirements are unchanged.
+- `git diff --check` passed. Official current API schemas/changelog reviewed; no authenticated vendor calls performed and no key is configured. Live isolation, mutation fencing/deletion, native macOS transport and cloud RLS remain pending. See `SUPERMEMORY_ADAPTER.md`.
+
 ## MemoryProvider and Memory Service — 2026-09-23
 
 - Complete package on Swift 6.2.1 / Ubuntu 24.04: `swift test -j 2` — **152 tests passed, 0 failures**.

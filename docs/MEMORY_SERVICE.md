@@ -47,4 +47,4 @@ Provider IDs identify deployments/index generations (for example `vendor.product
 
 The complete portable suite passes 152 tests, including 26 new service/provider tests. Tests use a revision-fenced contract double, plus actual file-backed restart and corruption tests. They prove the service/ledger behavior; they do not prove any vendor implements the contract.
 
-The Supermemory adapter, live API validation, cloud database isolation, Context Compiler retrieval wiring, native app composition, deployment workers, provider-wide deletion verification and full migration remain open. No external memory service has been contacted or configured by this milestone.
+The Supermemory read-only adapter foundation is now implemented separately (see `SUPERMEMORY_ADAPTER.md`), but its false revision-fencing capability intentionally prevents enrollment. Full Supermemory mutation support, live API validation, cloud database isolation, Context Compiler retrieval wiring, native app composition, deployment workers, provider-wide deletion verification and full migration remain open. No external memory service has been contacted or configured by this milestone.

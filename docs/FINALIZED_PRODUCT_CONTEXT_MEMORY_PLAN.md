@@ -10,7 +10,11 @@ Do **not** mark an item `[x]` because a type, interface, placeholder, mock, or p
 
 The purpose of this document is to prevent shallow implementations that technically satisfy a name while missing the intended product behavior, isolation, migration, or security guarantees.
 
-Latest checkpoint (2026-09-23, MemoryProvider and Memory Service): `core/memory-service` implements the provider-neutral adapter contract and a principal-bound `MemoryService` for canonical-first remember/supersede, scoped search/profile, forget, export, capabilities and bounded synchronization. Both ledger implementations atomically persist provider work with canonical changes. Revision-fenced operations, compare-before-acknowledgement, retry timestamps and retained deletion work cover outages, concurrent deletion and restart recovery. Responses resolve only to active canonical records with matching scope/provider mappings and fixed memory trust. Provider processing is explicitly disabled by default.
+Latest checkpoint (2026-09-23, Supermemory read-only adapter foundation): `core/supermemory-adapter` adds a principal-bound, explicitly enabled diagnostic search adapter and bounded HTTPS transport. Requests constrain container, namespace metadata, deployment and scope before remote retrieval; responses expose only validated canonical references and scores. Defaults disable reads. Writes/deletes and profiles are unsupported; `idempotentRevisionFencing` remains false, so Memory Service correctly rejects enrollment.
+
+Full portable validation: **164 tests passed, 0 failures**, including 12 new tests (with parameterized cases) for request filters, ownership/scope encoding, malformed/foreign responses, HTTP limits, cancellation and fail-closed capability gates. The live API specification was reviewed; it does not document the durable conditional revision/deletion guarantee required by our contract. No API key is configured and no authenticated vendor calls were made. The full Supermemory adapter checkbox stays open. Next: prove an enforcing write-fence mechanism, implement mutations against it, then run live isolation/retry/deletion canaries. See `SUPERMEMORY_ADAPTER.md` for the API evidence, metadata convention and exact blocker.
+
+Previous checkpoint (2026-09-23, MemoryProvider and Memory Service): `core/memory-service` implements the provider-neutral adapter contract and a principal-bound `MemoryService` for canonical-first remember/supersede, scoped search/profile, forget, export, capabilities and bounded synchronization. Both ledger implementations atomically persist provider work with canonical changes. Revision-fenced operations, compare-before-acknowledgement, retry timestamps and retained deletion work cover outages, concurrent deletion and restart recovery. Responses resolve only to active canonical records with matching scope/provider mappings and fixed memory trust. Provider processing is explicitly disabled by default.
 
 Full portable validation: **152 tests passed, 0 failures**, including 26 new service/provider tests and real file-backed restart tests. Version 2 local snapshots upgrade to version 3 without losing canonical records, provenance, history or tombstones. Tests use a provider contract double; no real provider has been connected. The Supermemory adapter must prove namespace/scoped retrieval and durable revision fencing (or an enforcing adapter/gateway) before it can be enabled. Next milestone: that adapter and live integration validation, then the remaining cloud-isolation and context-integration work. See `MEMORY_SERVICE.md` for the precise contract and limits.
 
@@ -876,6 +880,8 @@ Exact API shape can evolve, but provider-specific types must remain behind the a
 - [x] MemoryProvider contract.
 - [x] Memory Service.
 - [ ] Supermemory adapter.
+- [x] Supermemory read-only search/transport foundation with capability gate and portable tests (2026-09-23).
+- [ ] Supermemory durable write fencing, mutation receipts and live isolation/deletion validation.
 - [x] Provider-independent tests.
 - [x] Provider feature/capability reporting.
 
