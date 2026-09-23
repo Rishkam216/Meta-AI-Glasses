@@ -119,8 +119,8 @@ public protocol ContextStoring: Sendable {
     func get(_ id: UUID, as principal: TenantContext) async -> ContextItem?
     func query(_ query: ContextQuery, as principal: TenantContext, now: Date) async -> [ContextItem]
     @discardableResult
-    func remove(_ id: UUID, as principal: TenantContext) async -> Bool
-    func removeAll(as principal: TenantContext) async
+    func remove(_ id: UUID, as principal: TenantContext) async throws -> Bool
+    func removeAll(as principal: TenantContext) async throws
     func count(as principal: TenantContext) async -> Int
 }
 
