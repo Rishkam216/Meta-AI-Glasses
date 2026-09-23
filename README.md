@@ -11,15 +11,21 @@ The user's handoff is authoritative; see [docs/ARCHITECTURE.md](docs/ARCHITECTUR
   device + session binding, short expiry, one-time use, and replay rejection.
 - Capability-based `DeviceRouter` plus `RuntimeDeviceExecutor`; routing is by
   explicit device ID and advertised tools, never hard-coded OS pairings.
+- Provider-neutral `DecisionEngine`: deterministic rules first, bounded provider
+  second (future Jev adapter), optional reasoning-provider escalation last.
+- `AgentOrchestrator` binds tool intents to sessions and devices. Ambiguous
+  bounded AI device selection is opt-in and read-only; ambiguous non-read actions
+  require deterministic device context before approval/execution.
 - The Mac app still wires `DenyAllApprovals`, so no non-read tool can execute yet.
 - Permission preflight, explicit user-initiated Accessibility request.
 - Metadata-only JSONL audit log; failed initial audit prevents execution.
 - One real native tool: `ui.get_frontmost_app`, using `NSWorkspace`.
 
-No model, voice, shell, file editing, network listener, cloud gateway, or glasses
-integration is implemented. Unimplemented tools are absent from the catalog.
-The approval store is infrastructure only; there is not yet a local approval UI.
-The device router is in-memory only; encrypted remote transport comes later.
+No model SDK, Jev adapter, voice, shell, file editing, network listener, cloud
+gateway, or glasses integration is implemented. Unimplemented tools are absent
+from the catalog. The approval store is infrastructure only; there is not yet a
+local approval UI. The device router is in-memory only; encrypted remote transport
+comes later.
 
 ## Build on your Mac
 
@@ -58,11 +64,11 @@ implemented; this milestone only generates logs on manual diagnostic calls.
 
 ## Verification
 
-`swift test` on Linux compiles/tests **AgentCore only**. The current core suite has
-21 passing tests: 10 runtime/audit/contract tests, 5 approval tests, and 6 device
-routing tests. macOS targets are deliberately excluded on Linux; passing here does
-not validate AppKit, Accessibility, CoreGraphics, signing, TCC, or real desktop
-behavior.
+`swift test` on Linux compiles/tests **AgentCore only**. The current stacked core
+suite has **36 passing tests** covering runtime/audit contracts, approvals, device
+routing, decision escalation/output validation, and orchestrator routing safety.
+macOS targets are deliberately excluded on Linux; passing here does not validate
+AppKit, Accessibility, CoreGraphics, signing, TCC, or real desktop behavior.
 
 On a Mac with an interactive desktop, also run:
 
@@ -71,5 +77,6 @@ RUN_MAC_GUI_TESTS=1 swift test
 ```
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for actual results and the remaining
-native checks. Do not add a mutating native tool until the macOS build gate passes
-and a trusted local approval UI is wired to the approval store.
+native checks. See [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md) for the decision
+and routing contract. Do not add a mutating native tool until the macOS build gate
+passes and a trusted local approval UI is wired to the approval store.
