@@ -17,6 +17,7 @@ public enum MemoryValidationError: Error, Sendable, Equatable {
     case duplicateDerivedMemory
     case selfDerivation
     case inconsistentLifecycle
+    case invalidTimestamp
     case updatedBeforeCreated
 }
 
@@ -33,6 +34,8 @@ public enum MemoryLedgerError: Error, Sendable, Equatable {
     case nonActiveInsert
     case nonMonotonicSupersession(UUID)
     case providerMappingConflict
+    case deletedMemory(UUID)
+    case invalidDeletionTimestamp
 }
 
 public enum MemoryScopeKind: String, Codable, Sendable, Hashable {
@@ -113,6 +116,9 @@ public struct MemorySourceReference: Codable, Sendable, Equatable, Hashable {
         guard !trimmed.isEmpty else { throw MemoryValidationError.emptySourceReference }
         guard reference.utf8.count <= 1_024 else {
             throw MemoryValidationError.sourceReferenceTooLong
+        }
+        if let sourceTimestamp, !sourceTimestamp.timeIntervalSinceReferenceDate.isFinite {
+            throw MemoryValidationError.invalidTimestamp
         }
         self.type = type
         self.reference = reference
@@ -201,6 +207,10 @@ public struct MemoryRecord: Codable, Sendable, Equatable {
         }
 
         let finalUpdatedAt = updatedAt ?? createdAt
+        guard createdAt.timeIntervalSinceReferenceDate.isFinite,
+              finalUpdatedAt.timeIntervalSinceReferenceDate.isFinite else {
+            throw MemoryValidationError.invalidTimestamp
+        }
         guard finalUpdatedAt >= createdAt else { throw MemoryValidationError.updatedBeforeCreated }
 
         self.id = id
@@ -289,6 +299,7 @@ public struct MemoryProviderMapping: Codable, Sendable, Equatable {
         guard normalizedExternalID.utf8.count <= 1_024 else {
             throw MemoryValidationError.providerMemoryIDTooLong
         }
+        guard indexedAt.timeIntervalSinceReferenceDate.isFinite else { throw MemoryValidationError.invalidTimestamp }
         self.memoryID = memoryID
         self.provider = normalizedProvider
         self.providerMemoryID = normalizedExternalID
@@ -324,46 +335,57 @@ public struct MemoryLedgerQuery: Sendable, Equatable {
     }
 }
 
+/// Content-free deletion marker. Retained in exports so rebuilding a provider
+/// cannot treat a previously deleted canonical ID as new.
+public struct MemoryTombstone: Codable, Sendable, Equatable {
+    public let memoryID: UUID
+    public let tenant: TenantContext
+    public let deletedAt: Date
+}
+
 public struct PortableMemoryExport: Codable, Sendable, Equatable {
     public let formatVersion: Int
     public let exportedAt: Date
     public let memories: [MemoryRecord]
     public let providerMappings: [MemoryProviderMapping]
+    public let tombstones: [MemoryTombstone]
 
     public init(exportedAt: Date = Date(), memories: [MemoryRecord],
-                providerMappings: [MemoryProviderMapping]) {
-        formatVersion = 1
+                providerMappings: [MemoryProviderMapping], tombstones: [MemoryTombstone] = []) {
+        formatVersion = 2
         self.exportedAt = exportedAt
         self.memories = memories
         self.providerMappings = providerMappings
+        self.tombstones = tombstones
     }
 }
 
 public protocol MemoryLedgerStoring: Sendable {
     func insert(_ record: MemoryRecord, as principal: TenantContext) async throws
-    func memory(id: UUID, as principal: TenantContext) async -> MemoryRecord?
-    func query(_ query: MemoryLedgerQuery, as principal: TenantContext) async -> [MemoryRecord]
+    func memory(id: UUID, as principal: TenantContext) async throws -> MemoryRecord?
+    func query(_ query: MemoryLedgerQuery, as principal: TenantContext) async throws -> [MemoryRecord]
     func supersede(with record: MemoryRecord, as principal: TenantContext,
                    at timestamp: Date) async throws
     func setProviderMapping(_ mapping: MemoryProviderMapping,
                             as principal: TenantContext) async throws
-    func providerMappings(memoryID: UUID, as principal: TenantContext) async -> [MemoryProviderMapping]
-    func export(as principal: TenantContext, at timestamp: Date) async -> PortableMemoryExport
+    func providerMappings(memoryID: UUID, as principal: TenantContext) async throws -> [MemoryProviderMapping]
+    func export(as principal: TenantContext, at timestamp: Date) async throws -> PortableMemoryExport
+    func forget(id: UUID, as principal: TenantContext, at timestamp: Date) async throws
 }
 
-/// In-memory canonical reference ledger. Durable storage will later implement the
-/// same tenant-partition-first semantics plus database-level isolation.
-public actor InMemoryMemoryLedger: MemoryLedgerStoring {
+/// Shared value-state engine. Mutations validate fully before committing a partition.
+struct MemoryLedgerState: Sendable {
     private struct Partition: Sendable {
         var memories: [UUID: MemoryRecord] = [:]
         var mappings: [String: MemoryProviderMapping] = [:]
+        var tombstones: [UUID: MemoryTombstone] = [:]
     }
 
     private var partitions: [TenantContext: Partition] = [:]
 
     public init() {}
 
-    public func insert(_ record: MemoryRecord, as principal: TenantContext) throws {
+    mutating func insert(_ record: MemoryRecord, as principal: TenantContext) throws {
         guard record.tenant.isSamePrincipal(as: principal) else {
             throw MemoryLedgerError.ownershipMismatch
         }
@@ -375,6 +397,9 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
         }
 
         var partition = partitions[principal, default: Partition()]
+        guard partition.tombstones[record.id] == nil else {
+            throw MemoryLedgerError.deletedMemory(record.id)
+        }
         guard partition.memories[record.id] == nil else {
             throw MemoryLedgerError.duplicateMemory(record.id)
         }
@@ -405,7 +430,7 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
             .map { $0 }
     }
 
-    public func supersede(with record: MemoryRecord, as principal: TenantContext,
+    mutating func supersede(with record: MemoryRecord, as principal: TenantContext,
                           at timestamp: Date = Date()) throws {
         guard record.tenant.isSamePrincipal(as: principal) else {
             throw MemoryLedgerError.ownershipMismatch
@@ -416,11 +441,14 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
         guard !record.supersedes.isEmpty else {
             throw MemoryLedgerError.supersessionRequiresTarget
         }
-        guard timestamp >= record.createdAt else {
+        guard timestamp.timeIntervalSinceReferenceDate.isFinite, timestamp >= record.updatedAt else {
             throw MemoryLedgerError.nonMonotonicSupersession(record.id)
         }
 
         var partition = partitions[principal, default: Partition()]
+        guard partition.tombstones[record.id] == nil else {
+            throw MemoryLedgerError.deletedMemory(record.id)
+        }
         guard partition.memories[record.id] == nil else {
             throw MemoryLedgerError.duplicateMemory(record.id)
         }
@@ -451,11 +479,13 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
                 updatedAt: timestamp
             )
         }
-        partition.memories[record.id] = record
+        partition.memories[record.id] = try record.replacingLifecycle(
+            state: .active, supersededBy: nil, updatedAt: timestamp
+        )
         partitions[principal] = partition
     }
 
-    public func setProviderMapping(_ mapping: MemoryProviderMapping,
+    mutating func setProviderMapping(_ mapping: MemoryProviderMapping,
                                    as principal: TenantContext) throws {
         guard var partition = partitions[principal],
               partition.memories[mapping.memoryID] != nil else {
@@ -504,8 +534,104 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
         return PortableMemoryExport(
             exportedAt: timestamp,
             memories: memories,
-            providerMappings: mappings
+            providerMappings: mappings,
+            tombstones: partition.tombstones.values.sorted { $0.memoryID.uuidString < $1.memoryID.uuidString }
         )
+    }
+
+    mutating func forget(id: UUID, as principal: TenantContext, at timestamp: Date) throws {
+        guard timestamp.timeIntervalSinceReferenceDate.isFinite else {
+            throw MemoryLedgerError.invalidDeletionTimestamp
+        }
+        var partition = partitions[principal, default: Partition()]
+        if partition.tombstones[id] != nil { return }
+        // Traverse the supersession family both ways, and derivations outward.
+        // Forgetting a derived fact does not delete its independent source.
+        var dependents: [UUID: Set<UUID>] = [:]
+        for record in partition.memories.values {
+            for parent in record.derivedFromMemoryIDs {
+                dependents[parent, default: []].insert(record.id)
+            }
+            for previous in record.supersedes {
+                dependents[previous, default: []].insert(record.id)
+                dependents[record.id, default: []].insert(previous)
+            }
+        }
+        var removed: Set<UUID> = [id]
+        var pending = [id]
+        while let current = pending.popLast() {
+            for related in dependents[current, default: []] {
+                if removed.insert(related).inserted { pending.append(related) }
+            }
+        }
+        guard removed.allSatisfy({ partition.memories[$0].map { timestamp >= $0.updatedAt } ?? true }) else {
+            throw MemoryLedgerError.invalidDeletionTimestamp
+        }
+        for memoryID in removed {
+            partition.memories.removeValue(forKey: memoryID)
+            partition.tombstones[memoryID] = MemoryTombstone(memoryID: memoryID, tenant: principal, deletedAt: timestamp)
+        }
+        partition.mappings = partition.mappings.filter { !removed.contains($0.value.memoryID) }
+        partitions[principal] = partition
+    }
+
+    /// Restore only validated, single-principal snapshots. Never replay history as
+    /// fresh inserts, which would lose lifecycle and permit deleted IDs to return.
+    init(restoring snapshot: PortableMemoryExport, as principal: TenantContext) throws {
+        guard snapshot.formatVersion == 2 else {
+            throw MemoryPersistenceError.unsupportedVersion(snapshot.formatVersion)
+        }
+        var partition = Partition()
+        for tombstone in snapshot.tombstones {
+            guard tombstone.tenant == principal,
+                  tombstone.deletedAt.timeIntervalSinceReferenceDate.isFinite,
+                  partition.tombstones[tombstone.memoryID] == nil else {
+                throw MemoryPersistenceError.corruptFile
+            }
+            partition.tombstones[tombstone.memoryID] = tombstone
+        }
+        for record in snapshot.memories {
+            guard record.tenant == principal, partition.memories[record.id] == nil,
+                  partition.tombstones[record.id] == nil else {
+                throw MemoryPersistenceError.corruptFile
+            }
+            partition.memories[record.id] = record
+        }
+        for record in partition.memories.values {
+            try validateDerivedReferences(record, in: partition)
+            for oldID in record.supersedes {
+                guard let old = partition.memories[oldID], old.supersededBy == record.id,
+                      old.state == .superseded, old.scope == record.scope,
+                      old.updatedAt >= record.createdAt else { throw MemoryPersistenceError.corruptFile }
+            }
+            if let nextID = record.supersededBy {
+                guard let next = partition.memories[nextID], next.supersedes.contains(record.id) else {
+                    throw MemoryPersistenceError.corruptFile
+                }
+            }
+        }
+        // Iterative topological validation rejects cycles without recursive stack growth.
+        var dependencies = partition.memories.mapValues { Set($0.derivedFromMemoryIDs + $0.supersedes) }
+        var dependents: [UUID: [UUID]] = [:]
+        for (id, sources) in dependencies {
+            for source in sources { dependents[source, default: []].append(id) }
+        }
+        var ready = dependencies.filter { $0.value.isEmpty }.map { $0.key }
+        var visited = 0
+        while let id = ready.popLast() {
+            visited += 1
+            for child in dependents[id, default: []] {
+                dependencies[child]?.remove(id)
+                if dependencies[child]?.isEmpty == true { ready.append(child) }
+            }
+        }
+        guard visited == partition.memories.count else { throw MemoryPersistenceError.corruptFile }
+        partitions[principal] = partition
+        for mapping in snapshot.providerMappings {
+            let key = Self.mappingKey(provider: mapping.provider, memoryID: mapping.memoryID)
+            guard partitions[principal]?.mappings[key] == nil else { throw MemoryPersistenceError.corruptFile }
+            try setProviderMapping(mapping, as: principal)
+        }
     }
 
     private func validateDerivedReferences(_ record: MemoryRecord,
@@ -519,5 +645,36 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
 
     private static func mappingKey(provider: String, memoryID: UUID) -> String {
         "\(provider)|\(memoryID.uuidString)"
+    }
+}
+
+/// Portable reference implementation sharing validation and transaction semantics
+/// with the durable ledger. Identity is always supplied by trusted caller code.
+public actor InMemoryMemoryLedger: MemoryLedgerStoring {
+    private var state = MemoryLedgerState()
+    public init() {}
+    public func insert(_ record: MemoryRecord, as principal: TenantContext) throws {
+        try state.insert(record, as: principal)
+    }
+    public func memory(id: UUID, as principal: TenantContext) -> MemoryRecord? {
+        state.memory(id: id, as: principal)
+    }
+    public func query(_ query: MemoryLedgerQuery, as principal: TenantContext) -> [MemoryRecord] {
+        state.query(query, as: principal)
+    }
+    public func supersede(with record: MemoryRecord, as principal: TenantContext, at timestamp: Date = Date()) throws {
+        try state.supersede(with: record, as: principal, at: timestamp)
+    }
+    public func setProviderMapping(_ mapping: MemoryProviderMapping, as principal: TenantContext) throws {
+        try state.setProviderMapping(mapping, as: principal)
+    }
+    public func providerMappings(memoryID: UUID, as principal: TenantContext) -> [MemoryProviderMapping] {
+        state.providerMappings(memoryID: memoryID, as: principal)
+    }
+    public func export(as principal: TenantContext, at timestamp: Date = Date()) -> PortableMemoryExport {
+        state.export(as: principal, at: timestamp)
+    }
+    public func forget(id: UUID, as principal: TenantContext, at timestamp: Date = Date()) throws {
+        try state.forget(id: id, as: principal, at: timestamp)
     }
 }

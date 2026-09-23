@@ -10,6 +10,20 @@ Do **not** mark an item `[x]` because a type, interface, placeholder, mock, or p
 
 The purpose of this document is to prevent shallow implementations that technically satisfy a name while missing the intended product behavior, isolation, migration, or security guarantees.
 
+Latest checkpoint (2026-09-23, durable local Memory Ledger): the existing `core/memory-ledger` contract is now combined with context foundation commit `58e1359`. `FileBackedMemoryLedger` implements `MemoryLedgerStoring` with one authenticated tenant/user/account per file, persistent source/derived records, supersession history, provider mappings, and v2 exports with deletion tombstones. Every read reloads under a file lock; every mutation validates, fsyncs a private temporary snapshot, and atomically replaces the prior snapshot. Owner-only directories/files, directory-relative access, and symlink/hard-link/non-regular-file refusal protect local persistence. Local forgetting removes the supersession family and derived copies, removes mappings, and rejects deleted-ID reinsertion after restart.
+
+Full combined AgentCore validation: **126 tests passed, 0 failures** on Swift 6.2.1 / Ubuntu 24.04. This also freshly validates the previously unrun durable-context, refresh, and orchestrator tests. Native macOS validation is still pending. The older working-copy notes below are historical and are superseded by this checkpoint where they say durable local persistence is absent.
+
+The broad Canonical Memory Ledger and Provider-ID mapping table items remain open for cloud database isolation and Memory Service/provider integration. The completed local work is checked separately below. Next portable implementation slice: MemoryProvider contract and Memory Service, followed by the Supermemory adapter and cloud isolation in the stated sequence. No live provider calls, cloud deployment, or native application wiring are claimed by this checkpoint. See `MEMORY_LEDGER.md` and `VALIDATION.md` for the storage contract and validation scope.
+
+Working-copy progress note (2026-09-23): `core/context-foundation` now implements the tenant-bound context item schema, provenance/trust metadata, freshness/staleness contract, and `TenantContext`. Focused Swift validation: 9/9 tests passing. Context Service, persistence, compiler, automatic stale refresh, and database-level isolation remain unchecked.
+
+Working-copy progress note (2026-09-23, context compiler): `core/context-foundation` now also contains a tenant-partitioned in-memory Context Service, typed interface/session/device/task states, and a selective Context Compiler. Exact focused Swift run after context hardening: 35/35 tests passing. The broad Context Service, Session context store, Interface context, Device context, and Task/job context checklist items remain open until durable persistence/live refresh/full orchestrator integration exists. Context Compiler, model-specific trust policies, trust-label preservation, and compiler isolation tests are complete.
+
+Working-copy progress note (2026-09-23, consolidation): PR #5 was superseded after its stronger bounded Context Service semantics were merged into PR #4 / `core/context-foundation`. The consolidated context foundation passes 32/32 focused tests. Durable persistence, automatic stale refresh, application/connected-service adapters, and full orchestrator/realtime wiring remain open.
+
+
+
 ---
 
 # 1. Product identity
@@ -610,7 +624,7 @@ Never dump an entire inbox, Drive, repository history, or service account into m
 ## Implementation checklist
 
 - [ ] Context Service.
-- [ ] Context item schema.
+- [x] Context item schema.
 - [ ] Session context store.
 - [ ] Interface context.
 - [ ] Device context.
@@ -692,8 +706,8 @@ This applies to:
 
 ## Implementation checklist
 
-- [ ] Context Compiler.
-- [ ] Model-specific context policies.
+- [x] Context Compiler.
+- [x] Model-specific context policies.
 - [ ] Session summarization.
 - [ ] Artifact reference model.
 - [ ] Bounded artifact reads.
@@ -762,8 +776,8 @@ The orchestrator/context compiler should refresh stale ephemeral context rather 
 
 ## Implementation checklist
 
-- [ ] Freshness metadata on context items.
-- [ ] Expiry/staleness policy.
+- [x] Freshness metadata on context items.
+- [x] Expiry/staleness policy.
 - [ ] Automatic re-fetch of stale ephemeral context where required.
 
 ---
@@ -799,12 +813,15 @@ The orchestrator and security layer must preserve this distinction.
 
 ## Implementation checklist
 
-- [ ] Provenance/trust metadata on context.
-- [ ] Context compiler preserves trust labels.
+- [x] Provenance/trust metadata on context.
+- [x] Context compiler preserves trust labels.
 - [ ] Prompt-injection tests using webpage/email/document content.
 - [ ] External content cannot grant permissions or approvals.
 
 ---
+
+
+Working-copy progress note (2026-09-23, context hardening): the canonical `core/context-foundation` branch now also validates and bounds typed session/interface/device/task state, requires a phone companion for Meta-glasses interface state, uses explicit context scopes, makes user/memory/external/model-generated context opt-in, restricts bounded/Jev-style decisions to curated system/tool state, and preserves bounded stale-context refresh. Focused validation: 35/35 tests passing. PRs #5/#6/#7 were closed as superseded by PR #4.
 
 # 11. Long-term memory strategy
 
@@ -941,14 +958,22 @@ Retaining source evidence allows a future memory provider to regenerate improved
 ## Implementation checklist
 
 - [ ] Canonical Memory Ledger.
-- [ ] Our own stable memory IDs.
+- [x] Durable local/offline ledger implementing the canonical storage contract.
+- [x] Restart-safe source/derived provenance and atomic supersession history.
+- [x] Durable local provider-ID mappings with conflict rejection.
+- [x] Exact-principal file binding and local read/write/export isolation tests.
+- [x] Concurrent-writer exclusion and fail-closed snapshot validation.
+- [x] Our own stable memory IDs.
 - [ ] Provider-ID mapping table.
-- [ ] Source provenance.
-- [ ] Derived-memory provenance.
-- [ ] Supersession/history model.
-- [ ] Portable export format.
+- [x] Source provenance.
+- [x] Derived-memory provenance.
+- [x] Supersession/history model.
+- [x] Portable export format.
 
 ---
+
+
+Working-copy progress note (2026-09-23, Memory Ledger contract): `core/memory-ledger` now has provider-independent canonical memory records, stable IDs, source + derived provenance, atomic supersession/history, replaceable provider mappings, and versioned portable export. Focused production-contract validation: 18/18 tests passing. `Canonical Memory Ledger` and `Provider-ID mapping table` remain unchecked because the current reference ledger/mappings are in-memory; durable persistence and database isolation are still required before those can be considered complete.
 
 # 13. Provider migration without memory loss
 
@@ -1062,6 +1087,8 @@ Deletion records/tombstones may be required depending on the final persistence d
 ## Implementation checklist
 
 - [ ] Canonical forget/delete operation.
+- [x] Local canonical forgetting, lineage/derivation cleanup, and persistent tombstones.
+- [x] Local restart/reinsertion tests proving deleted IDs cannot reappear.
 - [ ] Provider deletion propagation.
 - [ ] Cache invalidation.
 - [ ] Migration respects deletions.
@@ -1171,8 +1198,8 @@ Do not copy raw private memories into global analytics tables.
 
 ## Implementation checklist
 
-- [ ] TenantContext type/contract.
-- [ ] Tenant context required by memory APIs.
+- [x] TenantContext type/contract.
+- [x] Tenant context required by memory APIs.
 - [ ] Database-level row isolation.
 - [ ] Provider namespace isolation.
 - [ ] Tenant-scoped vector retrieval.
@@ -1233,7 +1260,7 @@ Run these tests across:
 - [ ] Cross-tenant canary fixture.
 - [ ] Direct-search isolation tests.
 - [ ] Semantic-search isolation tests.
-- [ ] Context-compiler isolation tests.
+- [x] Context-compiler isolation tests.
 - [ ] Cache isolation tests.
 - [ ] Job isolation tests.
 - [ ] Migration isolation tests.
