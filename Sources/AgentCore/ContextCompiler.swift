@@ -79,11 +79,12 @@ public struct ContextCompiler: Sendable {
     public func compile(_ request: ContextCompilationRequest,
                         as principal: TenantContext,
                         now: Date = Date()) async throws -> CompiledContext {
-        let candidates = await store.query(
-            ContextQuery(keys: request.requestedKeys, includeStale: false),
-            as: principal,
-            now: now
+        let query = try ContextQuery(
+            keys: request.requestedKeys,
+            includeStale: false,
+            limit: 100
         )
+        let candidates = await store.query(query, as: principal, now: now)
 
         let relevant = candidates
             .filter { isRelevant($0, to: request) }
@@ -134,10 +135,10 @@ public struct ContextCompiler: Sendable {
         case .realtime:
             return [.userInstruction, .systemState, .toolResult, .memory, .modelGenerated]
         case .reasoning:
-            return Set([
+            return [
                 .userInstruction, .systemState, .toolResult,
                 .externalContent, .memory, .modelGenerated
-            ])
+            ]
         }
     }
 
