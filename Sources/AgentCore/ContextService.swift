@@ -14,10 +14,12 @@ public struct ContextQuery: Sendable, Equatable {
     public let keys: Set<String>?
     public let trust: Set<ContextTrustClass>?
     public let origins: Set<ContextOrigin>?
+    public let freshnessClasses: Set<ContextFreshnessClass>?
     public let sessionID: UUID?
     public let deviceID: UUID?
     public let taskID: UUID?
     public let includeStale: Bool
+    public let onlyStale: Bool
     public let limit: Int
 
     public init(exactScope: ContextScope? = nil,
@@ -25,10 +27,12 @@ public struct ContextQuery: Sendable, Equatable {
                 keys: Set<String>? = nil,
                 trust: Set<ContextTrustClass>? = nil,
                 origins: Set<ContextOrigin>? = nil,
+                freshnessClasses: Set<ContextFreshnessClass>? = nil,
                 sessionID: UUID? = nil,
                 deviceID: UUID? = nil,
                 taskID: UUID? = nil,
                 includeStale: Bool = false,
+                onlyStale: Bool = false,
                 limit: Int = 100) throws {
         guard (1...100).contains(limit) else { throw ContextServiceError.invalidLimit }
         if let keys {
@@ -44,12 +48,70 @@ public struct ContextQuery: Sendable, Equatable {
         self.keys = keys
         self.trust = trust
         self.origins = origins
+        self.freshnessClasses = freshnessClasses
         self.sessionID = sessionID
         self.deviceID = deviceID
         self.taskID = taskID
         self.includeStale = includeStale
+        self.onlyStale = onlyStale
         self.limit = limit
     }
+
+    func matches(_ item: ContextItem,
+                 freshnessPolicy: ContextFreshnessPolicy,
+                 now: Date) -> Bool {
+        let isStale = item.isStale(at: now, policy: freshnessPolicy)
+        if onlyStale {
+            if !isStale { return false }
+        } else if !includeStale, isStale {
+            return false
+        }
+        if let exactScope, item.scope != exactScope {
+            return false
+        }
+        if let scopeKinds, !scopeKinds.contains(item.scope.kind) {
+            return false
+        }
+        if let keys, !keys.contains(item.key) {
+            return false
+        }
+        if let trust, !trust.contains(item.provenance.trust) {
+            return false
+        }
+        if let origins, !origins.contains(item.provenance.origin) {
+            return false
+        }
+        if let freshnessClasses,
+           !freshnessClasses.contains(item.freshness.classification) {
+            return false
+        }
+        if let sessionID, item.bindings.sessionID != sessionID {
+            return false
+        }
+        if let deviceID, item.bindings.deviceID != deviceID {
+            return false
+        }
+        if let taskID, item.bindings.taskID != taskID {
+            return false
+        }
+        return true
+    }
+}
+
+func orderedContextItems<S: Sequence>(_ items: S,
+                                      matching query: ContextQuery,
+                                      freshnessPolicy: ContextFreshnessPolicy,
+                                      now: Date) -> [ContextItem]
+where S.Element == ContextItem {
+    items.filter { query.matches($0, freshnessPolicy: freshnessPolicy, now: now) }
+        .sorted { lhs, rhs in
+            if lhs.freshness.observedAt != rhs.freshness.observedAt {
+                return lhs.freshness.observedAt > rhs.freshness.observedAt
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+        .prefix(query.limit)
+        .map { $0 }
 }
 
 public protocol ContextStoring: Sendable {
@@ -57,8 +119,8 @@ public protocol ContextStoring: Sendable {
     func get(_ id: UUID, as principal: TenantContext) async -> ContextItem?
     func query(_ query: ContextQuery, as principal: TenantContext, now: Date) async -> [ContextItem]
     @discardableResult
-    func remove(_ id: UUID, as principal: TenantContext) async -> Bool
-    func removeAll(as principal: TenantContext) async
+    func remove(_ id: UUID, as principal: TenantContext) async throws -> Bool
+    func removeAll(as principal: TenantContext) async throws
     func count(as principal: TenantContext) async -> Int
 }
 
@@ -86,51 +148,12 @@ public actor InMemoryContextService: ContextStoring {
     public func query(_ query: ContextQuery, as principal: TenantContext,
                       now: Date = Date()) -> [ContextItem] {
         guard let partition = itemsByPrincipal[principal] else { return [] }
-
-        let matches = partition.values.filter { item in
-            if !query.includeStale,
-               item.isStale(at: now, policy: freshnessPolicy) {
-                return false
-            }
-            if let exactScope = query.exactScope, item.scope != exactScope {
-                return false
-            }
-            if let scopeKinds = query.scopeKinds,
-               !scopeKinds.contains(item.scope.kind) {
-                return false
-            }
-            if let keys = query.keys, !keys.contains(item.key) {
-                return false
-            }
-            if let trust = query.trust,
-               !trust.contains(item.provenance.trust) {
-                return false
-            }
-            if let origins = query.origins,
-               !origins.contains(item.provenance.origin) {
-                return false
-            }
-            if let sessionID = query.sessionID,
-               item.bindings.sessionID != sessionID {
-                return false
-            }
-            if let deviceID = query.deviceID,
-               item.bindings.deviceID != deviceID {
-                return false
-            }
-            if let taskID = query.taskID,
-               item.bindings.taskID != taskID {
-                return false
-            }
-            return true
-        }
-
-        return matches.sorted { lhs, rhs in
-            if lhs.freshness.observedAt != rhs.freshness.observedAt {
-                return lhs.freshness.observedAt > rhs.freshness.observedAt
-            }
-            return lhs.id.uuidString < rhs.id.uuidString
-        }.prefix(query.limit).map { $0 }
+        return orderedContextItems(
+            partition.values,
+            matching: query,
+            freshnessPolicy: freshnessPolicy,
+            now: now
+        )
     }
 
     @discardableResult

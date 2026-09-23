@@ -1,38 +1,21 @@
 # Validation record
 
-## Canonical Memory Ledger contract — 2026-09-23
-
-Environment: Swift 6.2.1 on Linux x86_64.
-
-- Added provider-independent `MemoryRecord` with our own stable UUID, exact `TenantContext`, memory scope, source-backed/derived classification, portable JSON content, source evidence, derived-memory references, confidence, private visibility, lifecycle state, supersession history, and created/updated timestamps.
-- Added validated source references with source type, source locator, and source timestamp.
-- Added custom decoding so malformed wire data cannot bypass confidence, lifecycle, scope, source-reference, self-reference, duplicate-reference, or timestamp invariants.
-- Added tenant-partitioned `InMemoryMemoryLedger` reference implementation. User A and User B may even have the same canonical UUID without colliding because the principal partition is selected before lookup/query.
-- Derived memories can reference only canonical memories already present inside the same tenant partition.
-- Supersession is atomic: normal insert cannot create a half-supersession; replacement must name existing active memories in the same scope; historical records cannot be silently re-parented; and supersession timestamps cannot move history backward.
-- Active queries hide superseded facts by default while historical queries can recover the full chain.
-- Added provider mappings outside canonical `MemoryRecord`. One canonical memory can map to Supermemory and Zep simultaneously; provider names are normalized; one provider external ID cannot identify two canonical memories in the same principal partition; the same external ID may exist safely in another tenant partition.
-- Provider mappings may retain provider metadata without making the provider ID part of canonical memory identity.
-- Added versioned `PortableMemoryExport` containing canonical history and provider mappings only for the requested principal.
-- Focused Swift package using the production Memory Ledger contract and equivalent invariant tests: **18 tests passed, 0 failures**.
-
-This milestone is deliberately not marked as the finished production Memory Ledger: the implementation is still in-memory. Durable database persistence, database-level row isolation, tombstone/delete semantics, provider import/migration execution, and production backup/recovery remain pending.
-
 ## Context service + compiler — 2026-09-23
 
 Environment: Swift 6.2.1 on Linux x86_64.
 
 - Added tenant-partitioned `InMemoryContextService`; writes reject ownership mismatch and reads/queries/deletes enter the exact `TenantContext` partition before any filtering.
-- Consolidated the stronger bounded-query semantics from the earlier `core/context-service` branch into this implementation: exact scope, scope-kind, key, trust, origin, session, device and task filters; validated 1–100 result limits; newest-first deterministic ordering; partition-local count/clear/remove; and support for the same context UUID existing independently in different principals.
-- Added typed `InterfaceContextState`, `SessionContextState`, `DeviceContextState`, and `TaskContextState`, all convertible to portable `ContextItem` values with preserved provenance/freshness/bindings.
-- Added `ContextCompiler` with same-session/device/task relevance filtering, stale-item exclusion, role-specific trust policy, deterministic item/byte budgets, and provider-facing output that omits tenant/user/account IDs while preserving trust/provenance labels.
-- Jev-style bounded decisions receive only `user_instruction`, `system_state`, and `tool_result` context by default; external content, memory, and model-generated context are excluded.
-- Reasoning context may include external content, but `external_content` remains explicit and is never rewritten as a user instruction.
-- Cross-tenant canary tests verify User A and User B cannot retrieve each other's context through direct lookup, query, or compilation.
-- Same-user but unrelated session/device/task context is filtered out by the compiler.
-- Exact focused context run after consolidation: **32 tests passed, 0 failures**.
+- Consolidated bounded-query semantics: exact scope, scope-kind, key, trust, origin, freshness, session, device and task filters; validated 1–100 result limits; newest-first deterministic ordering; partition-local count/clear/remove; and support for the same context UUID existing independently in different principals.
+- Added validated typed `InterfaceContextState`, `SessionContextState`, `DeviceContextState`, and `TaskContextState`. User-controlled text/maps/lists are bounded, device capability names are trimmed/deduplicated/sorted, duplicate job IDs are rejected, and wire decoding re-runs validation. Meta-glasses interface state requires an explicit phone companion device.
+- Added `ContextRefreshCoordinator` with device/application/connected-service adapter boundaries. Adapters cannot change tenant, scope, key, bindings, or trust. Connected-service refresh is always tagged `external_content`; ambiguous adapters fail closed; cross-tenant refresh is rejected before adapter execution.
+- Added `ContextCompiler` with explicit requested scopes, same-user session/device/task isolation, stale-item exclusion, optional bounded stale-ephemeral refresh, deterministic item/byte budgets, and provider-facing output that omits tenant/user/account IDs while preserving trust/provenance labels.
+- User scope is not included unless explicitly requested. Long-term memory requires both user-scope selection and `includeMemory`. External content requires `includeExternalContent`. Model-generated context is reasoning-only and requires `includeModelGenerated`.
+- Jev-style bounded decisions receive only `system_state` and `tool_result`, even if a caller attempts to opt into user instructions, memory, external content, or model-generated context.
+- Failed stale refresh never falls back to stale data. Refresh work is bounded per compilation request.
+- Cross-tenant canary tests verify User A and User B cannot retrieve each other's context through direct lookup, query, compilation, or same-ID collisions.
+- Focused Linux package using the current production context source contracts plus hardening/regression tests: **35 tests passed, 0 failures**.
 
-This is still a portable/in-memory foundation. Durable persistence, automatic stale-context refresh, connected-service/application adapters, long-term memory integration, and full orchestrator/realtime wiring remain pending. The broad Context Service checklist item therefore remains open.
+This is still a portable/in-memory foundation. Durable persistence and database-level isolation are not implemented. Refresh adapter contracts exist and are tested with fakes, but real Mac/application/connected-service adapters and full orchestrator/realtime integration remain pending. The broad Context Service/session/device/task checklist items therefore remain conservatively open.
 
 ## Tenant + context-item foundation — 2026-09-23
 
@@ -48,9 +31,7 @@ Environment: Swift 6.2.1 on Linux x86_64.
 - Ran an isolated Swift package containing the production `JSONValue` contract, the committed context foundation, and its tests with `swift test -j 2`.
 - **9 context-foundation tests passed with zero failures**.
 - Tests cover exact tenant/user/account ownership, scope validation, round-trip preservation, cross-principal rejection, explicit and policy-driven staleness, invalid freshness policies, identifier bounds, external-content trust preservation, and malformed decoded-wire-data rejection.
-- This branch is stacked on the previously validated 36-test orchestrator/decision/device/approval AgentCore base. The existing sources were not modified by this slice. A single complete private-repository checkout is not available in the current Linux tool environment, so this entry does not claim a fresh whole-repository run.
-
-This validates the portable context schema/contract only. It does not yet validate durable persistence, database isolation, automatic stale-context refresh, memory storage, or model-provider integration.
+- This branch is stacked on the previously validated 36-test orchestrator/decision/device/approval AgentCore base. A single complete private-repository checkout is not available in the current Linux tool environment, so this entry does not claim a fresh whole-repository run.
 
 ## Orchestrator + decision engine — 2026-09-23
 
@@ -83,44 +64,31 @@ This validates portable AgentCore behavior only. It does not validate AppKit, Ac
 ## Milestone 1 — 2026-09-22
 
 - Swift 6.1.2 on Ubuntu 24.04, strict Swift 6 language mode.
-- `swift test -j 2`: AgentCore compiled and linked; **10 tests passed**, including
-  parameterized cases for all three non-read risks, malformed inputs, and both
-  initial/completion audit failure. Zero failures.
-- Verified successful output and correlation, metadata-only audit, denied
-  permissions, unknown tools, invalid arguments, refusal before execution,
-  failure after execution, duplicate registration, error redaction, JSON types
-  and large integers, audit append behavior, 0600 permissions and symlink refusal.
+- `swift test -j 2`: AgentCore compiled and linked; **10 tests passed**, including parameterized cases for all three non-read risks, malformed inputs, and both initial/completion audit failure. Zero failures.
+- Verified successful output and correlation, metadata-only audit, denied permissions, unknown tools, invalid arguments, refusal before execution, failure after execution, duplicate registration, error redaction, JSON types and large integers, audit append behavior, 0600 permissions and symlink refusal.
 - `bash -n scripts/build-app.sh`: passed.
 - Info.plist parsed; bundle executable and menu-bar metadata checked.
-- Native Swift sources parsed successfully with `swiftc -frontend -parse`.
-  This checks syntax only, not Apple API availability or actor annotations.
+- Native Swift sources parsed successfully with `swiftc -frontend -parse`. This checks syntax only, not Apple API availability or actor annotations.
 
 ## Native validation still pending
 
 - macOS type checking, linking, bundle signing, or launch.
 - MacRuntime adapter tests (excluded from the Linux manifest).
 - Real foreground-app lookup, permission prompt/grant/revocation, or menu UI.
-- GitHub Actions run 35757635596 has repeatedly failed before any workflow step
-  starts because the account-side macOS hosted-runner restriction remains active.
-  No Swift build failure has been observed from that workflow.
+- GitHub Actions run 35757635596 has repeatedly failed before any workflow step starts because the account-side macOS hosted-runner restriction remains active. No Swift build failure has been observed from that workflow.
 
-Therefore the project is **core-verified, native verification pending**.
-Do not describe it as a working, fully verified Mac app yet.
+Therefore the project is **core-verified, native verification pending**. Do not describe it as a working, fully verified Mac app yet.
 
 ## Native gate
 
 1. On macOS 14+ with Swift 6+, run `swift test`.
 2. Run `bash scripts/build-app.sh`; verify successful codesign checks.
 3. `open dist/MetaAIGlasses.app`; ensure one Agent menu appears.
-4. Leave Accessibility disabled. Inspect Safari after the 3-second delay.
-   Expect a success result identifying Safari, with a positive PID.
+4. Leave Accessibility disabled. Inspect Safari after the 3-second delay. Expect a success result identifying Safari, with a positive PID.
 5. Repeat with another app and confirm the identity changes.
-6. Check that each request has started/completed audit events sharing its ID,
-   without application names, arguments or result data in the audit file.
-7. Choose Request Accessibility permission. Confirm nothing is auto-granted;
-   grant/revoke in System Settings and reopen the menu to verify status changes.
+6. Check that each request has started/completed audit events sharing its ID, without application names, arguments or result data in the audit file.
+7. Choose Request Accessibility permission. Confirm nothing is auto-granted; grant/revoke in System Settings and reopen the menu to verify status changes.
 8. Run `RUN_MAC_GUI_TESTS=1 swift test` from the interactive Mac session.
 9. Quit and relaunch the app. Confirm log appends and the first tool still works.
 
-After this gate passes, `ui.get_windows` remains the next native read-only tool.
-Before the first mutating tool, wire a trusted local approval UI to `ApprovalStore`.
+After this gate passes, `ui.get_windows` remains the next native read-only tool. Before the first mutating tool, wire a trusted local approval UI to `ApprovalStore`.
