@@ -13,6 +13,26 @@ public struct AgentSession: Codable, Sendable, Equatable {
     }
 }
 
+/// Trusted execution identity and live request bindings. `TenantContext` must be
+/// supplied by authenticated backend/session code; it is never accepted from a
+/// model-generated tool request or external content.
+public struct AgentInvocationContext: Sendable, Equatable {
+    public let principal: TenantContext
+    public let session: AgentSession
+    public let interfaceID: UUID?
+    public let taskID: UUID?
+
+    public init(principal: TenantContext,
+                session: AgentSession,
+                interfaceID: UUID? = nil,
+                taskID: UUID? = nil) {
+        self.principal = principal
+        self.session = session
+        self.interfaceID = interfaceID
+        self.taskID = taskID
+    }
+}
+
 public struct ToolIntent: Codable, Sendable, Equatable {
     public let tool: String
     public let arguments: JSONValue
@@ -43,13 +63,35 @@ public enum OrchestrationError: Error, Sendable, Equatable {
 public struct AgentOrchestrator: Sendable {
     private let devices: DeviceRouter
     private let decisions: DecisionEngine
+    private let contextCompiler: ContextCompiler?
 
-    public init(devices: DeviceRouter, decisions: DecisionEngine) {
+    public init(devices: DeviceRouter,
+                decisions: DecisionEngine,
+                contextCompiler: ContextCompiler? = nil) {
         self.devices = devices
         self.decisions = decisions
+        self.contextCompiler = contextCompiler
     }
 
-    public func execute(_ intent: ToolIntent, in session: AgentSession) async throws -> ToolResult {
+    /// Compatibility path for callers that have not yet been upgraded to carry
+    /// authenticated tenant context. It intentionally does not compile stored
+    /// context into model decisions.
+    public func execute(_ intent: ToolIntent,
+                        in session: AgentSession) async throws -> ToolResult {
+        try await execute(intent, session: session, invocation: nil)
+    }
+
+    /// Preferred context-aware path. Tenant identity is supplied separately from
+    /// model-generated intent and may be used only to retrieve that principal's
+    /// context partition.
+    public func execute(_ intent: ToolIntent,
+                        in invocation: AgentInvocationContext) async throws -> ToolResult {
+        try await execute(intent, session: invocation.session, invocation: invocation)
+    }
+
+    private func execute(_ intent: ToolIntent,
+                         session: AgentSession,
+                         invocation: AgentInvocationContext?) async throws -> ToolResult {
         if let explicitDeviceID = intent.explicitDeviceID {
             return try await devices.route(
                 tool: intent.tool,
@@ -112,13 +154,40 @@ public struct AgentOrchestrator: Sendable {
                 ])
             )
         }
+
+        var state: [String: JSONValue] = [
+            "tool": .string(intent.tool),
+            "session_id": .string(session.id.uuidString),
+            "intent_state": intent.decisionState
+        ]
+
+        if let invocation, let contextCompiler {
+            let candidateScopes = Set(candidates.map { ContextScope.device($0.identity.id) })
+            let request = try ContextCompilationRequest(
+                consumer: .boundedDecision,
+                sessionID: session.id,
+                interfaceID: invocation.interfaceID,
+                taskID: invocation.taskID,
+                additionalScopes: candidateScopes,
+                includeUserScope: false,
+                includeExternalContent: false,
+                includeMemory: false,
+                includeModelGenerated: false,
+                maxItems: 24,
+                maxBytes: 16_384,
+                refreshStaleEphemeral: true,
+                maxRefreshItems: 8
+            )
+            let compiled = try await contextCompiler.compile(
+                request,
+                as: invocation.principal
+            )
+            state["compiled_context"] = try JSONValue.encoding(compiled)
+        }
+
         let decision = try await decisions.decide(DecisionRequest(
             objective: "Choose the most appropriate device for this read-only capability.",
-            state: .object([
-                "tool": .string(intent.tool),
-                "session_id": .string(session.id.uuidString),
-                "intent_state": intent.decisionState
-            ]),
+            state: .object(state),
             options: options
         ))
 
