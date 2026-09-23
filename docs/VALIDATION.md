@@ -1,16 +1,23 @@
 # Validation record
 
-## Core approval foundation — 2026-09-23
+## Device routing foundation — 2026-09-23
 
 Environment: Swift 6.2.1 on Linux x86_64.
 
-- Reconstructed the current AgentCore branch contents and ran `swift test -j 2`.
+- Added `DeviceIdentity`, `DeviceExecuting`, `RuntimeDeviceExecutor`, `DeviceRouter`, and structured routing errors.
+- Ran `swift test -j 2` against the approval + routing branch.
+- **21 tests passed with zero failures**: 10 original runtime/audit/contract tests, 5 approval tests, and 6 device-routing tests.
+- Routing tests verify capability-based candidate selection independent of platform metadata, exact device/session context construction, approval forwarding, unknown-device rejection, unadvertised-capability rejection, duplicate-device rejection, and routing through a real `ToolRuntime` adapter.
+- `snapshots()` copies the registered executor collection before awaiting capability calls so actor reentrancy cannot mutate the dictionary mid-iteration.
+
+This validates portable AgentCore behavior only. It does not validate AppKit, Accessibility, CoreGraphics, codesigning, TCC, or interactive macOS behavior.
+
+## Core approval foundation — 2026-09-23
+
 - **15 tests passed with zero failures**: the original 10 runtime/audit/contract tests plus 5 approval tests.
 - Approval tests verify exact binding, one-time execution, replay rejection, argument tamper rejection, device/session binding, expiry, bounded TTL, and refusal to issue approval for read-only tools.
 - Existing tests still verify default refusal of all non-read actions when no trusted approval issuer is supplied.
 - The current Mac composition root still uses the default `DenyAllApprovals`, so this branch does not enable mutations.
-
-This validates portable AgentCore behavior only. It does not validate AppKit, Accessibility, CoreGraphics, codesigning, TCC, or interactive macOS behavior.
 
 ## Milestone 1 — 2026-09-22
 
@@ -26,10 +33,6 @@ This validates portable AgentCore behavior only. It does not validate AppKit, Ac
 - Info.plist parsed; bundle executable and menu-bar metadata checked.
 - Native Swift sources parsed successfully with `swiftc -frontend -parse`.
   This checks syntax only, not Apple API availability or actor annotations.
-
-The local toolchain was obtained from Swift.org. A missing ncurses dependency
-was extracted locally from Ubuntu's official archive. These environment repairs
-are not project dependencies and are not included in the repository.
 
 ## Native validation still pending
 
