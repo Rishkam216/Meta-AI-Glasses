@@ -7,19 +7,28 @@ public enum MemoryValidationError: Error, Sendable, Equatable {
     case emptySourceReference
     case sourceReferenceTooLong
     case invalidConfidence
+    case invalidLimit
     case emptyProviderName
     case providerNameTooLong
     case emptyProviderMemoryID
     case providerMemoryIDTooLong
     case duplicateSupersededMemory
     case selfSupersession
+    case duplicateDerivedMemory
+    case selfDerivation
+    case inconsistentLifecycle
+    case updatedBeforeCreated
 }
 
 public enum MemoryLedgerError: Error, Sendable, Equatable {
     case ownershipMismatch
     case duplicateMemory(UUID)
     case memoryNotFound(UUID)
+    case derivedMemoryNotFound(UUID)
     case supersededMemoryNotFound(UUID)
+    case memoryAlreadySuperseded(UUID)
+    case supersessionScopeMismatch(UUID)
+    case supersessionRequiresTransaction
     case providerMappingConflict
 }
 
@@ -75,9 +84,9 @@ public struct MemoryScope: Codable, Sendable, Hashable {
 }
 
 public enum MemoryKind: String, Codable, Sendable, Hashable {
-    /// A portable memory derived directly from source evidence.
+    /// Portable fact backed directly by one or more source references.
     case sourceBacked = "source_backed"
-    /// A higher-level inference/profile fact derived from one or more memories.
+    /// Higher-level inference/profile fact derived from canonical memories.
     case derived
 }
 
@@ -119,9 +128,7 @@ public struct MemorySourceReference: Codable, Sendable, Equatable, Hashable {
     }
 }
 
-/// ACL enforcement is a later layer. For now every persisted record is private.
-/// The field exists in the portable schema so future migrations do not need to
-/// reinterpret historical ownership.
+/// ACL enforcement is a later layer. Every memory is private at this milestone.
 public enum MemoryVisibility: String, Codable, Sendable, Hashable {
     case privateUser = "private_user"
 }
@@ -131,7 +138,8 @@ public enum MemoryLifecycleState: String, Codable, Sendable, Hashable {
     case superseded
 }
 
-/// Canonical provider-independent memory record. Provider IDs never appear here.
+/// Canonical provider-independent memory record. Provider-specific IDs and
+/// embeddings never become part of canonical identity.
 public struct MemoryRecord: Codable, Sendable, Equatable {
     public let id: UUID
     public let tenant: TenantContext
@@ -148,6 +156,12 @@ public struct MemoryRecord: Codable, Sendable, Equatable {
     public let createdAt: Date
     public let updatedAt: Date
 
+    private enum CodingKeys: String, CodingKey {
+        case id, tenant, scope, kind, content, sourceReferences,
+             derivedFromMemoryIDs, confidence, visibility, state,
+             supersedes, supersededBy, createdAt, updatedAt
+    }
+
     public init(id: UUID = UUID(), tenant: TenantContext, scope: MemoryScope,
                 kind: MemoryKind, content: JSONValue,
                 sourceReferences: [MemorySourceReference] = [],
@@ -161,11 +175,32 @@ public struct MemoryRecord: Codable, Sendable, Equatable {
                 throw MemoryValidationError.invalidConfidence
             }
         }
+
         let uniqueSupersedes = Set(supersedes)
         guard uniqueSupersedes.count == supersedes.count else {
             throw MemoryValidationError.duplicateSupersededMemory
         }
-        guard !uniqueSupersedes.contains(id) else { throw MemoryValidationError.selfSupersession }
+        guard !uniqueSupersedes.contains(id) else {
+            throw MemoryValidationError.selfSupersession
+        }
+
+        let uniqueDerived = Set(derivedFromMemoryIDs)
+        guard uniqueDerived.count == derivedFromMemoryIDs.count else {
+            throw MemoryValidationError.duplicateDerivedMemory
+        }
+        guard !uniqueDerived.contains(id) else {
+            throw MemoryValidationError.selfDerivation
+        }
+
+        switch state {
+        case .active:
+            guard supersededBy == nil else { throw MemoryValidationError.inconsistentLifecycle }
+        case .superseded:
+            guard supersededBy != nil else { throw MemoryValidationError.inconsistentLifecycle }
+        }
+
+        let finalUpdatedAt = updatedAt ?? createdAt
+        guard finalUpdatedAt >= createdAt else { throw MemoryValidationError.updatedBeforeCreated }
 
         self.id = id
         self.tenant = tenant
@@ -180,7 +215,27 @@ public struct MemoryRecord: Codable, Sendable, Equatable {
         self.supersedes = supersedes
         self.supersededBy = supersededBy
         self.createdAt = createdAt
-        self.updatedAt = updatedAt ?? createdAt
+        self.updatedAt = finalUpdatedAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            id: values.decode(UUID.self, forKey: .id),
+            tenant: values.decode(TenantContext.self, forKey: .tenant),
+            scope: values.decode(MemoryScope.self, forKey: .scope),
+            kind: values.decode(MemoryKind.self, forKey: .kind),
+            content: values.decode(JSONValue.self, forKey: .content),
+            sourceReferences: values.decode([MemorySourceReference].self, forKey: .sourceReferences),
+            derivedFromMemoryIDs: values.decode([UUID].self, forKey: .derivedFromMemoryIDs),
+            confidence: values.decodeIfPresent(Double.self, forKey: .confidence),
+            visibility: values.decode(MemoryVisibility.self, forKey: .visibility),
+            state: values.decode(MemoryLifecycleState.self, forKey: .state),
+            supersedes: values.decode([UUID].self, forKey: .supersedes),
+            supersededBy: values.decodeIfPresent(UUID.self, forKey: .supersededBy),
+            createdAt: values.decode(Date.self, forKey: .createdAt),
+            updatedAt: values.decode(Date.self, forKey: .updatedAt)
+        )
     }
 
     func replacingLifecycle(state: MemoryLifecycleState,
@@ -205,28 +260,50 @@ public struct MemoryRecord: Codable, Sendable, Equatable {
     }
 }
 
-/// Mapping is intentionally separate from MemoryRecord. Replacing a provider can
-/// discard/rebuild mappings while preserving canonical memory IDs and history.
-public struct MemoryProviderMapping: Codable, Sendable, Equatable, Hashable {
+/// Replaceable provider mapping. Multiple providers can map to one canonical
+/// memory, but one provider external ID cannot identify two canonical memories
+/// inside the same principal partition.
+public struct MemoryProviderMapping: Codable, Sendable, Equatable {
     public let memoryID: UUID
     public let provider: String
     public let providerMemoryID: String
+    public let metadata: JSONValue?
     public let indexedAt: Date
 
+    private enum CodingKeys: String, CodingKey {
+        case memoryID, provider, providerMemoryID, metadata, indexedAt
+    }
+
     public init(memoryID: UUID, provider: String, providerMemoryID: String,
-                indexedAt: Date = Date()) throws {
-        let providerTrimmed = provider.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !providerTrimmed.isEmpty else { throw MemoryValidationError.emptyProviderName }
-        guard provider.utf8.count <= 128 else { throw MemoryValidationError.providerNameTooLong }
-        let idTrimmed = providerMemoryID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !idTrimmed.isEmpty else { throw MemoryValidationError.emptyProviderMemoryID }
-        guard providerMemoryID.utf8.count <= 1_024 else {
+                metadata: JSONValue? = nil, indexedAt: Date = Date()) throws {
+        let normalizedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedProvider.isEmpty else { throw MemoryValidationError.emptyProviderName }
+        guard normalizedProvider.utf8.count <= 128 else {
+            throw MemoryValidationError.providerNameTooLong
+        }
+        let normalizedExternalID = providerMemoryID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedExternalID.isEmpty else {
+            throw MemoryValidationError.emptyProviderMemoryID
+        }
+        guard normalizedExternalID.utf8.count <= 1_024 else {
             throw MemoryValidationError.providerMemoryIDTooLong
         }
         self.memoryID = memoryID
-        self.provider = provider
-        self.providerMemoryID = providerMemoryID
+        self.provider = normalizedProvider
+        self.providerMemoryID = normalizedExternalID
+        self.metadata = metadata
         self.indexedAt = indexedAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            memoryID: values.decode(UUID.self, forKey: .memoryID),
+            provider: values.decode(String.self, forKey: .provider),
+            providerMemoryID: values.decode(String.self, forKey: .providerMemoryID),
+            metadata: values.decodeIfPresent(JSONValue.self, forKey: .metadata),
+            indexedAt: values.decode(Date.self, forKey: .indexedAt)
+        )
     }
 }
 
@@ -238,7 +315,7 @@ public struct MemoryLedgerQuery: Sendable, Equatable {
 
     public init(scope: MemoryScope? = nil, kinds: Set<MemoryKind>? = nil,
                 includeSuperseded: Bool = false, limit: Int = 100) throws {
-        guard (1...100).contains(limit) else { throw ContextServiceError.invalidLimit }
+        guard (1...100).contains(limit) else { throw MemoryValidationError.invalidLimit }
         self.scope = scope
         self.kinds = kinds
         self.includeSuperseded = includeSuperseded
@@ -289,10 +366,15 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
         guard record.tenant.isSamePrincipal(as: principal) else {
             throw MemoryLedgerError.ownershipMismatch
         }
+        guard record.supersedes.isEmpty else {
+            throw MemoryLedgerError.supersessionRequiresTransaction
+        }
+
         var partition = partitions[principal, default: Partition()]
         guard partition.memories[record.id] == nil else {
             throw MemoryLedgerError.duplicateMemory(record.id)
         }
+        try validateDerivedReferences(record, in: partition)
         partition.memories[record.id] = record
         partitions[principal] = partition
     }
@@ -324,22 +406,38 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
         guard record.tenant.isSamePrincipal(as: principal) else {
             throw MemoryLedgerError.ownershipMismatch
         }
+        guard record.state == .active, record.supersededBy == nil else {
+            throw MemoryValidationError.inconsistentLifecycle
+        }
+
         var partition = partitions[principal, default: Partition()]
         guard partition.memories[record.id] == nil else {
             throw MemoryLedgerError.duplicateMemory(record.id)
         }
+        try validateDerivedReferences(record, in: partition)
 
+        var oldRecords: [(UUID, MemoryRecord)] = []
+        oldRecords.reserveCapacity(record.supersedes.count)
         for oldID in record.supersedes {
             guard let old = partition.memories[oldID] else {
                 throw MemoryLedgerError.supersededMemoryNotFound(oldID)
             }
+            guard old.state == .active else {
+                throw MemoryLedgerError.memoryAlreadySuperseded(oldID)
+            }
+            guard old.scope == record.scope else {
+                throw MemoryLedgerError.supersessionScopeMismatch(oldID)
+            }
+            oldRecords.append((oldID, old))
+        }
+
+        for (oldID, old) in oldRecords {
             partition.memories[oldID] = try old.replacingLifecycle(
                 state: .superseded,
                 supersededBy: record.id,
                 updatedAt: timestamp
             )
         }
-
         partition.memories[record.id] = record
         partitions[principal] = partition
     }
@@ -350,12 +448,21 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
               partition.memories[mapping.memoryID] != nil else {
             throw MemoryLedgerError.memoryNotFound(mapping.memoryID)
         }
-        let key = Self.mappingKey(provider: mapping.provider, memoryID: mapping.memoryID)
-        if let existing = partition.mappings[key],
+
+        let canonicalKey = Self.mappingKey(provider: mapping.provider, memoryID: mapping.memoryID)
+        if let existing = partition.mappings[canonicalKey],
            existing.providerMemoryID != mapping.providerMemoryID {
             throw MemoryLedgerError.providerMappingConflict
         }
-        partition.mappings[key] = mapping
+        if partition.mappings.values.contains(where: {
+            $0.provider == mapping.provider &&
+            $0.providerMemoryID == mapping.providerMemoryID &&
+            $0.memoryID != mapping.memoryID
+        }) {
+            throw MemoryLedgerError.providerMappingConflict
+        }
+
+        partition.mappings[canonicalKey] = mapping
         partitions[principal] = partition
     }
 
@@ -378,14 +485,26 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
         let memories = partition.memories.values.sorted { $0.id.uuidString < $1.id.uuidString }
         let mappings = partition.mappings.values.sorted { lhs, rhs in
             if lhs.memoryID != rhs.memoryID { return lhs.memoryID.uuidString < rhs.memoryID.uuidString }
-            return lhs.provider < rhs.provider
+            if lhs.provider != rhs.provider { return lhs.provider < rhs.provider }
+            return lhs.providerMemoryID < rhs.providerMemoryID
         }
-        return PortableMemoryExport(exportedAt: timestamp,
-                                    memories: memories,
-                                    providerMappings: mappings)
+        return PortableMemoryExport(
+            exportedAt: timestamp,
+            memories: memories,
+            providerMappings: mappings
+        )
+    }
+
+    private func validateDerivedReferences(_ record: MemoryRecord,
+                                           in partition: Partition) throws {
+        for sourceID in record.derivedFromMemoryIDs {
+            guard partition.memories[sourceID] != nil else {
+                throw MemoryLedgerError.derivedMemoryNotFound(sourceID)
+            }
+        }
     }
 
     private static func mappingKey(provider: String, memoryID: UUID) -> String {
-        "\(provider.lowercased())|\(memoryID.uuidString)"
+        "\(provider)|\(memoryID.uuidString)"
     }
 }
