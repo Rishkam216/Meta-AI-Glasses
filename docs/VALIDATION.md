@@ -1,5 +1,23 @@
 # Validation record
 
+## Tenant + context-item foundation — 2026-09-23
+
+Environment: Swift 6.2.1 on Linux x86_64.
+
+- Added required `TenantContext` ownership metadata with tenant, user, and optional account identity.
+- Added portable `ContextItem`, explicit scope, runtime bindings, provenance/trust classification, freshness metadata, and configurable max-age policy.
+- Context scope/key/source identifiers are bounded and reject empty/ambiguous values.
+- Private context ownership uses exact principal matching; future shared-workspace access must be an explicit ACL layer rather than weakening this boundary.
+- Added explicit `external_content`, `memory`, and `model_generated` trust classifications so retrieved content cannot be represented as a user instruction by omission.
+- Added custom decoding for validated wire-facing structs. Decoding re-runs validation instead of allowing Swift synthesized `Decodable` to bypass constructor invariants.
+- Explicit validity windows and policy maximum ages both participate in staleness checks; no freshness class receives a hidden implicit TTL in AgentCore.
+- Ran an isolated Swift package containing the production `JSONValue` contract, the committed context foundation, and its tests with `swift test -j 2`.
+- **9 context-foundation tests passed with zero failures**.
+- Tests cover exact tenant/user/account ownership, scope validation, round-trip preservation, cross-principal rejection, explicit and policy-driven staleness, invalid freshness policies, identifier bounds, external-content trust preservation, and malformed decoded-wire-data rejection.
+- This branch is stacked on the previously validated 36-test orchestrator/decision/device/approval AgentCore base. The existing sources were not modified by this slice. A single complete private-repository checkout is not available in the current Linux tool environment, so this entry does not claim a fresh 45-test whole-repository run.
+
+This validates the portable context schema/contract only. It does not yet implement the Context Service, database isolation, automatic stale-context refresh, Context Compiler, memory storage, or model integration.
+
 ## Orchestrator + decision engine — 2026-09-23
 
 Environment: Swift 6.2.1 on Linux x86_64.
