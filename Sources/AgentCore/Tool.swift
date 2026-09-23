@@ -1,6 +1,6 @@
 import Foundation
 
-public enum RiskLevel: String, Codable, Sendable {
+public enum RiskLevel: String, Codable, Sendable, Hashable {
     case read
     case reversibleWrite = "reversible_write"
     case externalEffect = "external_effect"
