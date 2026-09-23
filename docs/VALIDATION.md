@@ -1,8 +1,18 @@
-# Milestone 1 validation
+# Validation record
 
-Date: 2026-09-22.
+## Core approval foundation — 2026-09-23
 
-## Executed here
+Environment: Swift 6.2.1 on Linux x86_64.
+
+- Reconstructed the current AgentCore branch contents and ran `swift test -j 2`.
+- **15 tests passed with zero failures**: the original 10 runtime/audit/contract tests plus 5 approval tests.
+- Approval tests verify exact binding, one-time execution, replay rejection, argument tamper rejection, device/session binding, expiry, bounded TTL, and refusal to issue approval for read-only tools.
+- Existing tests still verify default refusal of all non-read actions when no trusted approval issuer is supplied.
+- The current Mac composition root still uses the default `DenyAllApprovals`, so this branch does not enable mutations.
+
+This validates portable AgentCore behavior only. It does not validate AppKit, Accessibility, CoreGraphics, codesigning, TCC, or interactive macOS behavior.
+
+## Milestone 1 — 2026-09-22
 
 - Swift 6.1.2 on Ubuntu 24.04, strict Swift 6 language mode.
 - `swift test -j 2`: AgentCore compiled and linked; **10 tests passed**, including
@@ -21,28 +31,19 @@ The local toolchain was obtained from Swift.org. A missing ncurses dependency
 was extracted locally from Ubuntu's official archive. These environment repairs
 are not project dependencies and are not included in the repository.
 
-## Not executed
+## Native validation still pending
 
 - macOS type checking, linking, bundle signing, or launch.
 - MacRuntime adapter tests (excluded from the Linux manifest).
 - Real foreground-app lookup, permission prompt/grant/revocation, or menu UI.
-- GitHub Actions run 35757635596 for commit c96705650c4860cf6553b132c651ed6645be61df
-  was rejected before any steps started. On 2026-09-23, its annotation reported an
-  account payment/spending-limit restriction. No macOS compilation or test ran.
-  Resolve the account restriction and rerun the workflow, or execute the native
-  checks below on a Mac. Do not change repository visibility to work around it.
-  Run: https://github.com/Rishkam216/Meta-AI-Glasses/actions/runs/35757635596
+- GitHub Actions run 35757635596 has repeatedly failed before any workflow step
+  starts because the account-side macOS hosted-runner restriction remains active.
+  No Swift build failure has been observed from that workflow.
 
-## Repository delivery
-
-The private repository https://github.com/Rishkam216/Meta-AI-Glasses was created
-and all 18 initial project files were uploaded on 2026-09-22. The GitHub connection
-has repository access; a personal access token is not required.
-
-Therefore this milestone is **core-verified, native verification pending**.
+Therefore the project is **core-verified, native verification pending**.
 Do not describe it as a working, fully verified Mac app yet.
 
-## Gate before the next tool
+## Native gate
 
 1. On macOS 14+ with Swift 6+, run `swift test`.
 2. Run `bash scripts/build-app.sh`; verify successful codesign checks.
@@ -57,4 +58,5 @@ Do not describe it as a working, fully verified Mac app yet.
 8. Run `RUN_MAC_GUI_TESTS=1 swift test` from the interactive Mac session.
 9. Quit and relaunch the app. Confirm log appends and the first tool still works.
 
-Once these pass, implement and verify `ui.get_windows` as the next small change.
+After this gate passes, `ui.get_windows` remains the next native read-only tool.
+Before the first mutating tool, wire a trusted local approval UI to `ApprovalStore`.
