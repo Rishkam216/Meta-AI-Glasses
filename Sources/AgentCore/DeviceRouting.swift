@@ -74,8 +74,12 @@ public actor DeviceRouter {
     }
 
     public func snapshots() async -> [DeviceSnapshot] {
+        // Copy the actor-isolated collection before awaiting remote/dynamic
+        // capability calls so reentrancy cannot mutate the dictionary mid-iteration.
+        let current = Array(executors.values)
         var values: [DeviceSnapshot] = []
-        for executor in executors.values {
+        values.reserveCapacity(current.count)
+        for executor in current {
             values.append(DeviceSnapshot(identity: executor.identity,
                                          capabilities: await executor.capabilities()))
         }
