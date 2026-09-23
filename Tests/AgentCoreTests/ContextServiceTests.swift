@@ -81,7 +81,7 @@ private func contextItem(
         as: tenantB
     )
 
-    let query = ContextQuery(keys: ["project_note"], includeStale: true)
+    let query = try ContextQuery(keys: ["project_note"], includeStale: true)
     let a = await store.query(query, as: tenantA, now: now)
     let b = await store.query(query, as: tenantB, now: now)
 
@@ -105,8 +105,8 @@ private func contextItem(
     try await store.put(item, as: tenant)
 
     let afterExpiry = observed.addingTimeInterval(11)
-    #expect(await store.query(ContextQuery(), as: tenant, now: afterExpiry).isEmpty)
-    #expect(await store.query(ContextQuery(includeStale: true), as: tenant, now: afterExpiry).count == 1)
+    #expect(await store.query(try ContextQuery(), as: tenant, now: afterExpiry).isEmpty)
+    #expect(await store.query(try ContextQuery(includeStale: true), as: tenant, now: afterExpiry).count == 1)
 }
 
 @Test func queryFiltersScopeAndKeysWithinPrincipalPartition() async throws {
@@ -126,7 +126,7 @@ private func contextItem(
         as: tenant
     )
 
-    let query = ContextQuery(scopeKinds: [.device], keys: ["frontmost_app"], includeStale: true)
+    let query = try ContextQuery(scopeKinds: [.device], keys: ["frontmost_app"], includeStale: true)
     let result = await store.query(query, as: tenant, now: now)
 
     #expect(result.count == 1)
