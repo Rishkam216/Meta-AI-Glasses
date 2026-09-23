@@ -26,9 +26,18 @@ are not project dependencies and are not included in the repository.
 - macOS type checking, linking, bundle signing, or launch.
 - MacRuntime adapter tests (excluded from the Linux manifest).
 - Real foreground-app lookup, permission prompt/grant/revocation, or menu UI.
-- GitHub Actions: workflow is prepared, but no remote repository existed or was
-  connected when this record was written. GitHub connector authentication works;
-  it exposes no repository-creation operation, and the browser needs sign-in.
+- GitHub Actions run 35757635596 for commit c96705650c4860cf6553b132c651ed6645be61df
+  was rejected before any steps started. On 2026-09-23, its annotation reported an
+  account payment/spending-limit restriction. No macOS compilation or test ran.
+  Resolve the account restriction and rerun the workflow, or execute the native
+  checks below on a Mac. Do not change repository visibility to work around it.
+  Run: https://github.com/Rishkam216/Meta-AI-Glasses/actions/runs/35757635596
+
+## Repository delivery
+
+The private repository https://github.com/Rishkam216/Meta-AI-Glasses was created
+and all 18 initial project files were uploaded on 2026-09-22. The GitHub connection
+has repository access; a personal access token is not required.
 
 Therefore this milestone is **core-verified, native verification pending**.
 Do not describe it as a working, fully verified Mac app yet.
