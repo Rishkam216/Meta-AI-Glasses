@@ -1,21 +1,55 @@
 import Foundation
 
-public struct ContextQuery: Sendable, Equatable {
-    public let scopeKinds: Set<ContextScopeKind>?
-    public let keys: Set<String>?
-    public let includeStale: Bool
-
-    public init(scopeKinds: Set<ContextScopeKind>? = nil,
-                keys: Set<String>? = nil,
-                includeStale: Bool = false) {
-        self.scopeKinds = scopeKinds
-        self.keys = keys
-        self.includeStale = includeStale
-    }
-}
-
 public enum ContextServiceError: Error, Sendable, Equatable {
     case ownershipMismatch
+    case invalidLimit
+    case invalidKey
+}
+
+/// Exact-match query over already-collected context. Tenant identity is not part
+/// of the query; the trusted caller passes `TenantContext` separately.
+public struct ContextQuery: Sendable, Equatable {
+    public let exactScope: ContextScope?
+    public let scopeKinds: Set<ContextScopeKind>?
+    public let keys: Set<String>?
+    public let trust: Set<ContextTrustClass>?
+    public let origins: Set<ContextOrigin>?
+    public let sessionID: UUID?
+    public let deviceID: UUID?
+    public let taskID: UUID?
+    public let includeStale: Bool
+    public let limit: Int
+
+    public init(exactScope: ContextScope? = nil,
+                scopeKinds: Set<ContextScopeKind>? = nil,
+                keys: Set<String>? = nil,
+                trust: Set<ContextTrustClass>? = nil,
+                origins: Set<ContextOrigin>? = nil,
+                sessionID: UUID? = nil,
+                deviceID: UUID? = nil,
+                taskID: UUID? = nil,
+                includeStale: Bool = false,
+                limit: Int = 100) throws {
+        guard (1...100).contains(limit) else { throw ContextServiceError.invalidLimit }
+        if let keys {
+            for key in keys {
+                let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, key.utf8.count <= 256 else {
+                    throw ContextServiceError.invalidKey
+                }
+            }
+        }
+        self.exactScope = exactScope
+        self.scopeKinds = scopeKinds
+        self.keys = keys
+        self.trust = trust
+        self.origins = origins
+        self.sessionID = sessionID
+        self.deviceID = deviceID
+        self.taskID = taskID
+        self.includeStale = includeStale
+        self.limit = limit
+    }
 }
 
 public protocol ContextStoring: Sendable {
@@ -24,11 +58,12 @@ public protocol ContextStoring: Sendable {
     func query(_ query: ContextQuery, as principal: TenantContext, now: Date) async -> [ContextItem]
     @discardableResult
     func remove(_ id: UUID, as principal: TenantContext) async -> Bool
+    func removeAll(as principal: TenantContext) async
+    func count(as principal: TenantContext) async -> Int
 }
 
-/// Tenant-partitioned in-memory context store used by AgentCore and tests.
-/// The top-level key is the trusted TenantContext, so searches never scan a
-/// global pool and filter ownership afterward.
+/// Tenant-partitioned in-memory reference implementation. Durable/distributed
+/// implementations must preserve the same partition-before-filter semantics.
 public actor InMemoryContextService: ContextStoring {
     private var itemsByPrincipal: [TenantContext: [UUID: ContextItem]] = [:]
     private let freshnessPolicy: ContextFreshnessPolicy
@@ -41,9 +76,7 @@ public actor InMemoryContextService: ContextStoring {
         guard item.isOwned(by: principal) else {
             throw ContextServiceError.ownershipMismatch
         }
-        var partition = itemsByPrincipal[principal, default: [:]]
-        partition[item.id] = item
-        itemsByPrincipal[principal] = partition
+        itemsByPrincipal[principal, default: [:]][item.id] = item
     }
 
     public func get(_ id: UUID, as principal: TenantContext) -> ContextItem? {
@@ -54,43 +87,69 @@ public actor InMemoryContextService: ContextStoring {
                       now: Date = Date()) -> [ContextItem] {
         guard let partition = itemsByPrincipal[principal] else { return [] }
 
-        return partition.values
-            .filter { item in
-                if let scopeKinds = query.scopeKinds,
-                   !scopeKinds.contains(item.scope.kind) {
-                    return false
-                }
-                if let keys = query.keys,
-                   !keys.contains(item.key) {
-                    return false
-                }
-                if !query.includeStale,
-                   item.isStale(at: now, policy: freshnessPolicy) {
-                    return false
-                }
-                return true
+        let matches = partition.values.filter { item in
+            if !query.includeStale,
+               item.isStale(at: now, policy: freshnessPolicy) {
+                return false
             }
-            .sorted {
-                if $0.createdAt == $1.createdAt {
-                    return $0.id.uuidString < $1.id.uuidString
-                }
-                return $0.createdAt < $1.createdAt
+            if let exactScope = query.exactScope, item.scope != exactScope {
+                return false
             }
+            if let scopeKinds = query.scopeKinds,
+               !scopeKinds.contains(item.scope.kind) {
+                return false
+            }
+            if let keys = query.keys, !keys.contains(item.key) {
+                return false
+            }
+            if let trust = query.trust,
+               !trust.contains(item.provenance.trust) {
+                return false
+            }
+            if let origins = query.origins,
+               !origins.contains(item.provenance.origin) {
+                return false
+            }
+            if let sessionID = query.sessionID,
+               item.bindings.sessionID != sessionID {
+                return false
+            }
+            if let deviceID = query.deviceID,
+               item.bindings.deviceID != deviceID {
+                return false
+            }
+            if let taskID = query.taskID,
+               item.bindings.taskID != taskID {
+                return false
+            }
+            return true
+        }
+
+        return matches.sorted { lhs, rhs in
+            if lhs.freshness.observedAt != rhs.freshness.observedAt {
+                return lhs.freshness.observedAt > rhs.freshness.observedAt
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }.prefix(query.limit).map { $0 }
     }
 
     @discardableResult
     public func remove(_ id: UUID, as principal: TenantContext) -> Bool {
         guard var partition = itemsByPrincipal[principal] else { return false }
-        let removed = partition.removeValue(forKey: id) != nil
+        guard partition.removeValue(forKey: id) != nil else { return false }
         if partition.isEmpty {
             itemsByPrincipal.removeValue(forKey: principal)
         } else {
             itemsByPrincipal[principal] = partition
         }
-        return removed
+        return true
     }
 
     public func removeAll(as principal: TenantContext) {
         itemsByPrincipal.removeValue(forKey: principal)
+    }
+
+    public func count(as principal: TenantContext) -> Int {
+        itemsByPrincipal[principal]?.count ?? 0
     }
 }
