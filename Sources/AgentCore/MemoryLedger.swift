@@ -29,6 +29,9 @@ public enum MemoryLedgerError: Error, Sendable, Equatable {
     case memoryAlreadySuperseded(UUID)
     case supersessionScopeMismatch(UUID)
     case supersessionRequiresTransaction
+    case supersessionRequiresTarget
+    case nonActiveInsert
+    case nonMonotonicSupersession(UUID)
     case providerMappingConflict
 }
 
@@ -84,9 +87,7 @@ public struct MemoryScope: Codable, Sendable, Hashable {
 }
 
 public enum MemoryKind: String, Codable, Sendable, Hashable {
-    /// Portable fact backed directly by one or more source references.
     case sourceBacked = "source_backed"
-    /// Higher-level inference/profile fact derived from canonical memories.
     case derived
 }
 
@@ -366,6 +367,9 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
         guard record.tenant.isSamePrincipal(as: principal) else {
             throw MemoryLedgerError.ownershipMismatch
         }
+        guard record.state == .active, record.supersededBy == nil else {
+            throw MemoryLedgerError.nonActiveInsert
+        }
         guard record.supersedes.isEmpty else {
             throw MemoryLedgerError.supersessionRequiresTransaction
         }
@@ -409,6 +413,12 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
         guard record.state == .active, record.supersededBy == nil else {
             throw MemoryValidationError.inconsistentLifecycle
         }
+        guard !record.supersedes.isEmpty else {
+            throw MemoryLedgerError.supersessionRequiresTarget
+        }
+        guard timestamp >= record.createdAt else {
+            throw MemoryLedgerError.nonMonotonicSupersession(record.id)
+        }
 
         var partition = partitions[principal, default: Partition()]
         guard partition.memories[record.id] == nil else {
@@ -427,6 +437,9 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
             }
             guard old.scope == record.scope else {
                 throw MemoryLedgerError.supersessionScopeMismatch(oldID)
+            }
+            guard timestamp >= old.updatedAt else {
+                throw MemoryLedgerError.nonMonotonicSupersession(oldID)
             }
             oldRecords.append((oldID, old))
         }
