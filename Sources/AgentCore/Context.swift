@@ -54,6 +54,8 @@ public struct ContextScope: Codable, Sendable, Hashable {
     public let kind: ContextScopeKind
     public let referenceID: String?
 
+    private enum CodingKeys: String, CodingKey { case kind, referenceID }
+
     public init(kind: ContextScopeKind, referenceID: String? = nil) throws {
         if kind == .user {
             guard referenceID == nil else { throw ContextValidationError.unexpectedScopeReference }
@@ -67,18 +69,31 @@ public struct ContextScope: Codable, Sendable, Hashable {
         self.referenceID = referenceID
     }
 
-    public static let user = try! ContextScope(kind: .user)
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            kind: values.decode(ContextScopeKind.self, forKey: .kind),
+            referenceID: values.decodeIfPresent(String.self, forKey: .referenceID)
+        )
+    }
+
+    public static let user = ContextScope(validatedKind: .user, referenceID: nil)
 
     public static func session(_ id: UUID) -> ContextScope {
-        try! ContextScope(kind: .session, referenceID: id.uuidString)
+        ContextScope(validatedKind: .session, referenceID: id.uuidString)
     }
 
     public static func device(_ id: UUID) -> ContextScope {
-        try! ContextScope(kind: .device, referenceID: id.uuidString)
+        ContextScope(validatedKind: .device, referenceID: id.uuidString)
     }
 
     public static func task(_ id: UUID) -> ContextScope {
-        try! ContextScope(kind: .task, referenceID: id.uuidString)
+        ContextScope(validatedKind: .task, referenceID: id.uuidString)
+    }
+
+    private init(validatedKind: ContextScopeKind, referenceID: String?) {
+        kind = validatedKind
+        self.referenceID = referenceID
     }
 }
 
@@ -108,6 +123,8 @@ public struct ContextProvenance: Codable, Sendable, Equatable {
     public let trust: ContextTrustClass
     public let sourceReference: String?
 
+    private enum CodingKeys: String, CodingKey { case origin, trust, sourceReference }
+
     public init(origin: ContextOrigin, trust: ContextTrustClass,
                 sourceReference: String? = nil) throws {
         if let sourceReference {
@@ -120,6 +137,15 @@ public struct ContextProvenance: Codable, Sendable, Equatable {
         self.origin = origin
         self.trust = trust
         self.sourceReference = sourceReference
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            origin: values.decode(ContextOrigin.self, forKey: .origin),
+            trust: values.decode(ContextTrustClass.self, forKey: .trust),
+            sourceReference: values.decodeIfPresent(String.self, forKey: .sourceReference)
+        )
     }
 }
 
@@ -180,6 +206,8 @@ public struct ContextFreshness: Codable, Sendable, Equatable {
     public let observedAt: Date
     public let validUntil: Date?
 
+    private enum CodingKeys: String, CodingKey { case classification, observedAt, validUntil }
+
     public init(classification: ContextFreshnessClass, observedAt: Date,
                 validUntil: Date? = nil) throws {
         if let validUntil, validUntil < observedAt {
@@ -188,6 +216,15 @@ public struct ContextFreshness: Codable, Sendable, Equatable {
         self.classification = classification
         self.observedAt = observedAt
         self.validUntil = validUntil
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            classification: values.decode(ContextFreshnessClass.self, forKey: .classification),
+            observedAt: values.decode(Date.self, forKey: .observedAt),
+            validUntil: values.decodeIfPresent(Date.self, forKey: .validUntil)
+        )
     }
 
     public func isStale(at now: Date, policy: ContextFreshnessPolicy) -> Bool {
@@ -212,6 +249,10 @@ public struct ContextItem: Codable, Sendable, Equatable {
     public let bindings: ContextBindings
     public let createdAt: Date
 
+    private enum CodingKeys: String, CodingKey {
+        case id, tenant, scope, key, value, provenance, freshness, bindings, createdAt
+    }
+
     public init(id: UUID = UUID(), tenant: TenantContext, scope: ContextScope,
                 key: String, value: JSONValue, provenance: ContextProvenance,
                 freshness: ContextFreshness, bindings: ContextBindings = .none,
@@ -229,6 +270,21 @@ public struct ContextItem: Codable, Sendable, Equatable {
         self.freshness = freshness
         self.bindings = bindings
         self.createdAt = createdAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            id: values.decode(UUID.self, forKey: .id),
+            tenant: values.decode(TenantContext.self, forKey: .tenant),
+            scope: values.decode(ContextScope.self, forKey: .scope),
+            key: values.decode(String.self, forKey: .key),
+            value: values.decode(JSONValue.self, forKey: .value),
+            provenance: values.decode(ContextProvenance.self, forKey: .provenance),
+            freshness: values.decode(ContextFreshness.self, forKey: .freshness),
+            bindings: values.decode(ContextBindings.self, forKey: .bindings),
+            createdAt: values.decode(Date.self, forKey: .createdAt)
+        )
     }
 
     public func isOwned(by principal: TenantContext) -> Bool {
