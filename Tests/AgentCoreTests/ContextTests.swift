@@ -182,3 +182,15 @@ import Testing
     #expect(decoded.trust != .userInstruction)
     #expect(decoded.origin == .externalService)
 }
+
+@Test func decodedWireDataCannotBypassValidation() throws {
+    let invalidScope = Data(#"{"kind":"device","referenceID":"   "}"#.utf8)
+    #expect(throws: ContextValidationError.emptyScopeReference) {
+        _ = try JSONDecoder().decode(ContextScope.self, from: invalidScope)
+    }
+
+    let invalidProvenance = Data(#"{"origin":"tool","trust":"tool_result","sourceReference":""}"#.utf8)
+    #expect(throws: ContextValidationError.emptySourceReference) {
+        _ = try JSONDecoder().decode(ContextProvenance.self, from: invalidProvenance)
+    }
+}
