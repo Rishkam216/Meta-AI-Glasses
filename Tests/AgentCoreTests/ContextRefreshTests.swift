@@ -337,6 +337,7 @@ private func staleRefreshItem(tenant: TenantContext,
     let result = try await ContextCompiler(store: store, refresher: coordinator).compile(
         ContextCompilationRequest(
             consumer: .reasoning,
+            includeUserScope: true,
             maxRefreshItems: 1
         ),
         as: tenant,
