@@ -298,7 +298,7 @@ private func sourceMemory(
 
     let exportedAt = Date(timeIntervalSince1970: 9_999)
     let export = await ledger.export(as: a, at: exportedAt)
-    #expect(export.formatVersion == 2)
+    #expect(export.formatVersion == 3)
     #expect(export.exportedAt == exportedAt)
     #expect(Set(export.memories.map(\.id)) == Set([old.id, replacement.id]))
     #expect(export.providerMappings.map(\.providerMemoryID) == ["sm_new"])

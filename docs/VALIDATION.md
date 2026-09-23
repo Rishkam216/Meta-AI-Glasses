@@ -1,5 +1,15 @@
 # Validation record
 
+## MemoryProvider and Memory Service — 2026-09-23
+
+- Complete package on Swift 6.2.1 / Ubuntu 24.04: `swift test -j 2` — **152 tests passed, 0 failures**.
+- Added 26 service/provider tests covering canonical-first commits, processing disabled by default, every service identity boundary, same-ID cross-tenant canaries, scoped search/profile, canonical result validation, minimal provider payloads, capability gates, outage/cancellation retries, malformed receipts, bounded retry fairness, multiple providers/reindexing, lineage deletion and stale-acknowledgement rejection.
+- Controlled two-worker race proves a contract-compliant provider rejects a delayed lower-revision upsert after a newer deletion.
+- Real file-backed tests cover pending-work and acknowledgement restart recovery, remote-success/local-ack crash-window replay, atomic rollback on persistence failure, v2 upgrade, queue ownership/format corruption and revision-counter exhaustion.
+- Existing 126 portable tests continue to pass. `git diff --check` passed.
+- Provider tests use a revision-fenced contract double, not Supermemory or another live service. No live API behavior or production gateway is claimed. Native macOS and cloud RLS validation remain pending.
+
+
 ## Durable local Memory Ledger — 2026-09-23
 
 Environment: Swift 6.2.1, Ubuntu 24.04 x86_64, Swift 6 language mode.

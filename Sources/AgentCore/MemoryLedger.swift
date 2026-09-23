@@ -35,6 +35,7 @@ public enum MemoryLedgerError: Error, Sendable, Equatable {
     case nonMonotonicSupersession(UUID)
     case providerMappingConflict
     case deletedMemory(UUID)
+    case invalidSynchronizationState
     case invalidDeletionTimestamp
 }
 
@@ -349,14 +350,39 @@ public struct PortableMemoryExport: Codable, Sendable, Equatable {
     public let memories: [MemoryRecord]
     public let providerMappings: [MemoryProviderMapping]
     public let tombstones: [MemoryTombstone]
+    public let synchronization: MemorySyncInventory
 
     public init(exportedAt: Date = Date(), memories: [MemoryRecord],
-                providerMappings: [MemoryProviderMapping], tombstones: [MemoryTombstone] = []) {
-        formatVersion = 2
+                providerMappings: [MemoryProviderMapping], tombstones: [MemoryTombstone] = [],
+                synchronization: MemorySyncInventory = MemorySyncInventory()) {
+        formatVersion = 3
         self.exportedAt = exportedAt
         self.memories = memories
         self.providerMappings = providerMappings
         self.tombstones = tombstones
+        self.synchronization = synchronization
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion, exportedAt, memories, providerMappings, tombstones, synchronization
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try values.decode(Int.self, forKey: .formatVersion)
+        guard formatVersion == 2 || formatVersion == 3 else {
+            throw MemoryPersistenceError.unsupportedVersion(formatVersion)
+        }
+        exportedAt = try values.decode(Date.self, forKey: .exportedAt)
+        memories = try values.decode([MemoryRecord].self, forKey: .memories)
+        providerMappings = try values.decode([MemoryProviderMapping].self, forKey: .providerMappings)
+        tombstones = try values.decode([MemoryTombstone].self, forKey: .tombstones)
+        if formatVersion == 2 {
+            guard !values.contains(.synchronization) else { throw MemoryPersistenceError.corruptFile }
+            synchronization = MemorySyncInventory()
+        } else {
+            synchronization = try values.decode(MemorySyncInventory.self, forKey: .synchronization)
+        }
     }
 }
 
@@ -379,6 +405,7 @@ struct MemoryLedgerState: Sendable {
         var memories: [UUID: MemoryRecord] = [:]
         var mappings: [String: MemoryProviderMapping] = [:]
         var tombstones: [UUID: MemoryTombstone] = [:]
+        var synchronization = MemorySyncInventory()
     }
 
     private var partitions: [TenantContext: Partition] = [:]
@@ -405,7 +432,7 @@ struct MemoryLedgerState: Sendable {
         }
         try validateDerivedReferences(record, in: partition)
         partition.memories[record.id] = record
-        partitions[principal] = partition
+        try commitPartition(partition, as: principal)
     }
 
     public func memory(id: UUID, as principal: TenantContext) -> MemoryRecord? {
@@ -482,7 +509,7 @@ struct MemoryLedgerState: Sendable {
         partition.memories[record.id] = try record.replacingLifecycle(
             state: .active, supersededBy: nil, updatedAt: timestamp
         )
-        partitions[principal] = partition
+        try commitPartition(partition, as: principal)
     }
 
     mutating func setProviderMapping(_ mapping: MemoryProviderMapping,
@@ -506,7 +533,7 @@ struct MemoryLedgerState: Sendable {
         }
 
         partition.mappings[canonicalKey] = mapping
-        partitions[principal] = partition
+        try commitPartition(partition, as: principal)
     }
 
     public func providerMappings(memoryID: UUID,
@@ -535,7 +562,8 @@ struct MemoryLedgerState: Sendable {
             exportedAt: timestamp,
             memories: memories,
             providerMappings: mappings,
-            tombstones: partition.tombstones.values.sorted { $0.memoryID.uuidString < $1.memoryID.uuidString }
+            tombstones: partition.tombstones.values.sorted { $0.memoryID.uuidString < $1.memoryID.uuidString },
+            synchronization: partition.synchronization
         )
     }
 
@@ -572,13 +600,13 @@ struct MemoryLedgerState: Sendable {
             partition.tombstones[memoryID] = MemoryTombstone(memoryID: memoryID, tenant: principal, deletedAt: timestamp)
         }
         partition.mappings = partition.mappings.filter { !removed.contains($0.value.memoryID) }
-        partitions[principal] = partition
+        try commitPartition(partition, as: principal)
     }
 
     /// Restore only validated, single-principal snapshots. Never replay history as
     /// fresh inserts, which would lose lifecycle and permit deleted IDs to return.
     init(restoring snapshot: PortableMemoryExport, as principal: TenantContext) throws {
-        guard snapshot.formatVersion == 2 else {
+        guard snapshot.formatVersion == 2 || snapshot.formatVersion == 3 else {
             throw MemoryPersistenceError.unsupportedVersion(snapshot.formatVersion)
         }
         var partition = Partition()
@@ -632,6 +660,134 @@ struct MemoryLedgerState: Sendable {
             guard partitions[principal]?.mappings[key] == nil else { throw MemoryPersistenceError.corruptFile }
             try setProviderMapping(mapping, as: principal)
         }
+        try validateInventory(snapshot.synchronization, partition: partitions[principal]!, principal: principal)
+        partitions[principal]?.synchronization = snapshot.synchronization
+    }
+
+    mutating func enrollProviders(_ providers: Set<String>, as principal: TenantContext) throws {
+        var partition = partitions[principal, default: Partition()]
+        partition.synchronization.providers.formUnion(providers)
+        try commitPartition(partition, as: principal)
+    }
+
+    mutating func remember(_ record: MemoryRecord, replacing: Bool, providers: Set<String>,
+                           as principal: TenantContext, at timestamp: Date) throws {
+        var next = self
+        try next.enrollProviders(providers, as: principal)
+        if let existing = next.memory(id: record.id, as: principal), record.state == .active,
+           record.supersededBy == nil,
+           try existing.replacingLifecycle(state: .active, supersededBy: nil, updatedAt: record.updatedAt) == record {
+            self = next
+            return
+        }
+        if replacing { try next.supersede(with: record, as: principal, at: timestamp) }
+        else { try next.insert(record, as: principal) }
+        self = next
+    }
+
+    mutating func forget(id: UUID, providers: Set<String>, as principal: TenantContext, at timestamp: Date) throws {
+        var next = self
+        try next.enrollProviders(providers, as: principal)
+        try next.forget(id: id, as: principal, at: timestamp)
+        self = next
+    }
+
+    mutating func markAttempt(_ entry: MemorySyncEntry, as principal: TenantContext, at timestamp: Date) throws -> Bool {
+        guard entry.tenant == principal else { throw MemoryLedgerError.ownershipMismatch }
+        guard timestamp.timeIntervalSinceReferenceDate.isFinite else { throw MemoryLedgerError.invalidSynchronizationState }
+        guard var partition = partitions[principal], !entry.acknowledged,
+              partition.synchronization.entries.contains(entry) else { return false }
+        partition.synchronization.attemptTimes[entry.operationID] = timestamp
+        partitions[principal] = partition
+        return true
+    }
+
+    mutating func acknowledge(_ entry: MemorySyncEntry, providerMemoryID: String?,
+                              as principal: TenantContext, at timestamp: Date) throws -> Bool {
+        guard entry.tenant == principal else { throw MemoryLedgerError.ownershipMismatch }
+        guard var partition = partitions[principal],
+              let index = partition.synchronization.entries.firstIndex(where: { $0.operationID == entry.operationID }),
+              partition.synchronization.entries[index] == entry, !entry.acknowledged else { return false }
+        if entry.action == .upsert {
+            guard let providerMemoryID, partition.memories[entry.memoryID]?.state == .active else {
+                throw MemoryLedgerError.invalidSynchronizationState
+            }
+            let mapping = try MemoryProviderMapping(memoryID: entry.memoryID, provider: entry.providerID,
+                                                     providerMemoryID: providerMemoryID, indexedAt: timestamp)
+            guard !partition.mappings.values.contains(where: {
+                $0.provider == mapping.provider && $0.providerMemoryID == mapping.providerMemoryID && $0.memoryID != mapping.memoryID
+            }) else { throw MemoryLedgerError.providerMappingConflict }
+            // A valid fenced receipt may replace an old external ID after reindexing.
+            partition.mappings[Self.mappingKey(provider: entry.providerID, memoryID: entry.memoryID)] = mapping
+        } else {
+            guard providerMemoryID == nil else { throw MemoryLedgerError.invalidSynchronizationState }
+            partition.mappings.removeValue(forKey: Self.mappingKey(provider: entry.providerID, memoryID: entry.memoryID))
+        }
+        partition.synchronization.entries[index] = entry.acknowledging()
+        partition.synchronization.attemptTimes.removeValue(forKey: entry.operationID)
+        partitions[principal] = partition
+        return true
+    }
+
+    private mutating func commitPartition(_ input: Partition, as principal: TenantContext) throws {
+        var partition = input
+        var inventory = partition.synchronization
+        guard inventory.providers.count <= 8, inventory.providers.allSatisfy(validMemoryProviderID) else {
+            throw MemoryLedgerError.invalidSynchronizationState
+        }
+        var existing = Dictionary(uniqueKeysWithValues: inventory.entries.map {
+            (Self.mappingKey(provider: $0.providerID, memoryID: $0.memoryID), $0)
+        })
+        var desired = partition.memories.mapValues { $0.state == .active ? MemorySyncAction.upsert : .delete }
+        for id in partition.tombstones.keys { desired[id] = .delete }
+        for provider in inventory.providers.sorted() {
+            for id in desired.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+                let key = Self.mappingKey(provider: provider, memoryID: id)
+                let action = desired[id]!
+                if existing[key]?.action == action { continue }
+                guard inventory.sequence < UInt64.max else { throw MemoryLedgerError.invalidSynchronizationState }
+                inventory.sequence += 1
+                existing[key] = MemorySyncEntry(operationID: UUID(), tenant: principal,
+                                                providerID: provider, memoryID: id,
+                                                revision: inventory.sequence, action: action, acknowledged: false)
+            }
+        }
+        inventory.entries = existing.values.sorted { $0.revision < $1.revision }
+        let pendingOperations = Set(inventory.entries.filter { !$0.acknowledged }.map(\.operationID))
+        inventory.attemptTimes = inventory.attemptTimes.filter { pendingOperations.contains($0.key) }
+        partition.synchronization = inventory
+        partitions[principal] = partition
+    }
+
+    private func validateInventory(_ inventory: MemorySyncInventory, partition: Partition,
+                                   principal: TenantContext) throws {
+        guard inventory.providers.count <= 8, inventory.providers.allSatisfy(validMemoryProviderID) else {
+            throw MemoryPersistenceError.corruptFile
+        }
+        var keys: Set<String> = [], revisions: Set<UInt64> = [], operations: Set<UUID> = []
+        for entry in inventory.entries {
+            let key = Self.mappingKey(provider: entry.providerID, memoryID: entry.memoryID)
+            guard entry.tenant == principal, inventory.providers.contains(entry.providerID),
+                  entry.revision > 0, entry.revision <= inventory.sequence,
+                  keys.insert(key).inserted, revisions.insert(entry.revision).inserted,
+                  operations.insert(entry.operationID).inserted else { throw MemoryPersistenceError.corruptFile }
+            let expected: MemorySyncAction?
+            if partition.tombstones[entry.memoryID] != nil { expected = .delete }
+            else { expected = partition.memories[entry.memoryID].map { $0.state == .active ? .upsert : .delete } }
+            guard entry.action == expected else { throw MemoryPersistenceError.corruptFile }
+            if entry.acknowledged && entry.action == .upsert {
+                guard partition.mappings[key] != nil else { throw MemoryPersistenceError.corruptFile }
+            } else if entry.acknowledged && partition.mappings[key] != nil {
+                throw MemoryPersistenceError.corruptFile
+            }
+        }
+        let pendingOperations = Set(inventory.entries.filter { !$0.acknowledged }.map(\.operationID))
+        guard inventory.attemptTimes.allSatisfy({ pendingOperations.contains($0.key) && $0.value.timeIntervalSinceReferenceDate.isFinite }) else {
+            throw MemoryPersistenceError.corruptFile
+        }
+        guard inventory.entries.count == (partition.memories.count + partition.tombstones.count) * inventory.providers.count else {
+            throw MemoryPersistenceError.corruptFile
+        }
     }
 
     private func validateDerivedReferences(_ record: MemoryRecord,
@@ -650,7 +806,7 @@ struct MemoryLedgerState: Sendable {
 
 /// Portable reference implementation sharing validation and transaction semantics
 /// with the durable ledger. Identity is always supplied by trusted caller code.
-public actor InMemoryMemoryLedger: MemoryLedgerStoring {
+public actor InMemoryMemoryLedger: MemoryServiceLedger {
     private var state = MemoryLedgerState()
     public init() {}
     public func insert(_ record: MemoryRecord, as principal: TenantContext) throws {
@@ -676,5 +832,22 @@ public actor InMemoryMemoryLedger: MemoryLedgerStoring {
     }
     public func forget(id: UUID, as principal: TenantContext, at timestamp: Date = Date()) throws {
         try state.forget(id: id, as: principal, at: timestamp)
+    }
+    public func enrollProviders(_ providers: Set<String>, as principal: TenantContext) throws {
+        try state.enrollProviders(providers, as: principal)
+    }
+    public func remember(_ record: MemoryRecord, replacing: Bool, providers: Set<String>,
+                         as principal: TenantContext, at timestamp: Date) throws {
+        try state.remember(record, replacing: replacing, providers: providers, as: principal, at: timestamp)
+    }
+    public func forget(id: UUID, providers: Set<String>, as principal: TenantContext, at timestamp: Date) throws {
+        try state.forget(id: id, providers: providers, as: principal, at: timestamp)
+    }
+    public func markAttempt(_ entry: MemorySyncEntry, as principal: TenantContext, at timestamp: Date) throws -> Bool {
+        try state.markAttempt(entry, as: principal, at: timestamp)
+    }
+    public func acknowledge(_ entry: MemorySyncEntry, providerMemoryID: String?,
+                            as principal: TenantContext, at timestamp: Date) throws -> Bool {
+        try state.acknowledge(entry, providerMemoryID: providerMemoryID, as: principal, at: timestamp)
     }
 }

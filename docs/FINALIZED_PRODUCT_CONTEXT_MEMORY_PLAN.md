@@ -10,7 +10,13 @@ Do **not** mark an item `[x]` because a type, interface, placeholder, mock, or p
 
 The purpose of this document is to prevent shallow implementations that technically satisfy a name while missing the intended product behavior, isolation, migration, or security guarantees.
 
-Latest checkpoint (2026-09-23, durable local Memory Ledger): the existing `core/memory-ledger` contract is now combined with context foundation commit `58e1359`. `FileBackedMemoryLedger` implements `MemoryLedgerStoring` with one authenticated tenant/user/account per file, persistent source/derived records, supersession history, provider mappings, and v2 exports with deletion tombstones. Every read reloads under a file lock; every mutation validates, fsyncs a private temporary snapshot, and atomically replaces the prior snapshot. Owner-only directories/files, directory-relative access, and symlink/hard-link/non-regular-file refusal protect local persistence. Local forgetting removes the supersession family and derived copies, removes mappings, and rejects deleted-ID reinsertion after restart.
+Latest checkpoint (2026-09-23, MemoryProvider and Memory Service): `core/memory-service` implements the provider-neutral adapter contract and a principal-bound `MemoryService` for canonical-first remember/supersede, scoped search/profile, forget, export, capabilities and bounded synchronization. Both ledger implementations atomically persist provider work with canonical changes. Revision-fenced operations, compare-before-acknowledgement, retry timestamps and retained deletion work cover outages, concurrent deletion and restart recovery. Responses resolve only to active canonical records with matching scope/provider mappings and fixed memory trust. Provider processing is explicitly disabled by default.
+
+Full portable validation: **152 tests passed, 0 failures**, including 26 new service/provider tests and real file-backed restart tests. Version 2 local snapshots upgrade to version 3 without losing canonical records, provenance, history or tombstones. Tests use a provider contract double; no real provider has been connected. The Supermemory adapter must prove namespace/scoped retrieval and durable revision fencing (or an enforcing adapter/gateway) before it can be enabled. Next milestone: that adapter and live integration validation, then the remaining cloud-isolation and context-integration work. See `MEMORY_SERVICE.md` for the precise contract and limits.
+
+The MemoryProvider contract, portable Memory Service, provider-independent tests and capability reporting are now checked below. The overall plan remains open. Historical checkpoints below retain the state at their respective milestones.
+
+Historical checkpoint (2026-09-23, durable local Memory Ledger): the existing `core/memory-ledger` contract is now combined with context foundation commit `58e1359`. `FileBackedMemoryLedger` implements `MemoryLedgerStoring` with one authenticated tenant/user/account per file, persistent source/derived records, supersession history, provider mappings, and v2 exports with deletion tombstones. Every read reloads under a file lock; every mutation validates, fsyncs a private temporary snapshot, and atomically replaces the prior snapshot. Owner-only directories/files, directory-relative access, and symlink/hard-link/non-regular-file refusal protect local persistence. Local forgetting removes the supersession family and derived copies, removes mappings, and rejects deleted-ID reinsertion after restart.
 
 Full combined AgentCore validation: **126 tests passed, 0 failures** on Swift 6.2.1 / Ubuntu 24.04. This also freshly validates the previously unrun durable-context, refresh, and orchestrator tests. Native macOS validation is still pending. The older working-copy notes below are historical and are superseded by this checkpoint where they say durable local persistence is absent.
 
@@ -867,11 +873,11 @@ Exact API shape can evolve, but provider-specific types must remain behind the a
 
 ## Implementation checklist
 
-- [ ] MemoryProvider contract.
-- [ ] Memory Service.
+- [x] MemoryProvider contract.
+- [x] Memory Service.
 - [ ] Supermemory adapter.
-- [ ] Provider-independent tests.
-- [ ] Provider feature/capability reporting.
+- [x] Provider-independent tests.
+- [x] Provider feature/capability reporting.
 
 ---
 
@@ -963,6 +969,7 @@ Retaining source evidence allows a future memory provider to regenerate improved
 - [x] Durable local provider-ID mappings with conflict rejection.
 - [x] Exact-principal file binding and local read/write/export isolation tests.
 - [x] Concurrent-writer exclusion and fail-closed snapshot validation.
+- [x] Atomic canonical/provider work queue, durable acknowledgements and v2-to-v3 local upgrade.
 - [x] Our own stable memory IDs.
 - [ ] Provider-ID mapping table.
 - [x] Source provenance.

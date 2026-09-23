@@ -30,7 +30,7 @@ private struct MemoryFileEnvelope: Codable {
 /// Use a different URL for each principal, in an existing owner-only directory.
 /// This is not the cloud database or a replacement for server-side row isolation.
 /// Reads can throw: corrupt or unavailable storage must not look like empty memory.
-public actor FileBackedMemoryLedger: MemoryLedgerStoring {
+public actor FileBackedMemoryLedger: MemoryServiceLedger {
     private let principal: TenantContext
     private let file: LockedMemoryFile
 
@@ -80,6 +80,24 @@ public actor FileBackedMemoryLedger: MemoryLedgerStoring {
         try mutate(as: principal) { try $0.forget(id: id, as: principal, at: timestamp) }
     }
 
+    public func enrollProviders(_ providers: Set<String>, as principal: TenantContext) throws {
+        try mutate(as: principal) { try $0.enrollProviders(providers, as: principal) }
+    }
+    public func remember(_ record: MemoryRecord, replacing: Bool, providers: Set<String>,
+                         as principal: TenantContext, at timestamp: Date) throws {
+        try mutate(as: principal) { try $0.remember(record, replacing: replacing, providers: providers, as: principal, at: timestamp) }
+    }
+    public func forget(id: UUID, providers: Set<String>, as principal: TenantContext, at timestamp: Date) throws {
+        try mutate(as: principal) { try $0.forget(id: id, providers: providers, as: principal, at: timestamp) }
+    }
+    public func markAttempt(_ entry: MemorySyncEntry, as principal: TenantContext, at timestamp: Date) throws -> Bool {
+        try mutate(as: principal) { try $0.markAttempt(entry, as: principal, at: timestamp) }
+    }
+    public func acknowledge(_ entry: MemorySyncEntry, providerMemoryID: String?,
+                            as principal: TenantContext, at timestamp: Date) throws -> Bool {
+        try mutate(as: principal) { try $0.acknowledge(entry, providerMemoryID: providerMemoryID, as: principal, at: timestamp) }
+    }
+
     private func read<T: Sendable>(as caller: TenantContext, _ body: @Sendable (MemoryLedgerState) throws -> T) throws -> T {
         guard caller == principal else { throw MemoryLedgerError.ownershipMismatch }
         return try file.withLock {
@@ -88,13 +106,14 @@ public actor FileBackedMemoryLedger: MemoryLedgerStoring {
         }
     }
 
-    private func mutate(as caller: TenantContext, _ body: @Sendable (inout MemoryLedgerState) throws -> Void) throws {
+    private func mutate<T: Sendable>(as caller: TenantContext, _ body: @Sendable (inout MemoryLedgerState) throws -> T) throws -> T {
         guard caller == principal else { throw MemoryLedgerError.ownershipMismatch }
-        try file.withLock {
+        return try file.withLock {
             guard let data = try file.read() else { throw MemoryPersistenceError.missingFile }
             var state = try Self.decode(data, as: principal)
-            try body(&state)
+            let result = try body(&state)
             try Self.save(state, as: principal, to: file)
+            return result
         }
     }
 

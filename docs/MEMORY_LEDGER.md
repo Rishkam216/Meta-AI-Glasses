@@ -22,7 +22,7 @@ let results = try await ledger.query(
 
 Construct `authenticatedTenant` from trusted session/backend code. Do not accept authoritative tenant IDs from model output. Binding is checked before every read, query, write, export or delete. An empty file is bound to its principal at initialization; reopening it under another principal fails. The in-memory implementation partitions by the same full identity.
 
-No app composition root is wired to a memory provider yet. The next slice is the MemoryProvider/Memory Service boundary. The ledger does not grant approvals, select devices or execute tools.
+The provider-neutral Memory Service now uses this ledger through `MemoryServiceLedger`; see `MEMORY_SERVICE.md`. No native app composition root or live provider adapter is wired yet. The ledger does not grant approvals, select devices or execute tools.
 
 ## Transactions and recovery
 
@@ -40,10 +40,10 @@ Loading checks schema version, per-record constructor invariants, ownership, dup
 
 Local `forget` removes the requested memory's entire supersession family and all derived descendants (including their supersession families), with their provider mappings. Independent sources of a forgotten derived fact remain. The operation is atomic and idempotent. An unknown ID receives a tombstone too, so a delayed insert cannot resurrect it.
 
-Content-free tombstones contain the canonical ID, exact principal and deletion time. Inserts and supersessions cannot reuse tombstoned IDs. Portable export version 2 includes active records, history, provenance, mappings and tombstones in deterministic order. File envelope version 1 is separate from the portable format version. The new file store has no earlier persisted version to migrate; old v1 portable exports require an explicit future import/migration implementation.
+Content-free tombstones contain the canonical ID, exact principal and deletion time. Inserts and supersessions cannot reuse tombstoned IDs. Portable export version 3 includes active records, history, provenance, mappings, tombstones and durable provider synchronization state. File envelope version 1 is separate from the portable format version. Version 2 local snapshots load and upgrade on their next write; old v1 portable exports still require an explicit future import/migration implementation.
 
-This is local deletion only. A future Memory Service must atomically retain provider-deletion work (including provider IDs) before discarding live mappings, and propagate deletion to providers, caches, indexes and backups. Restoring a stale backup or regenerating a fact under a new ID is not prevented by these local tombstones alone; the planned migration/deletion pipeline must enforce that wider guarantee.
+The Memory Service now retains revision-fenced deletion work for every enrolled provider atomically with canonical deletion. Adapters delete by namespace/canonical ID and must retain durable revision fences; a late write must not undo deletion. Live adapter propagation, cache/index/backup verification and stale-backup recovery are still unverified. Regenerating a fact under a new canonical ID requires the wider retention/deletion policy.
 
 ## Completion boundary
 
-The local durable ledger, local mappings, local deletion and isolation tests are complete. The broad plan remains open for database-enforced cloud isolation, the Memory Service, provider adapters, provider deletion, disaster recovery/import, and migration. Do not expose this local file implementation as a cloud memory API or mark the overall architecture DONE.
+The local durable ledger, local mappings, local deletion and isolation tests are complete. The portable Memory Service and its recoverable provider work queue are also complete. The broad plan remains open for database-enforced cloud isolation, live provider adapters/deletion, disaster recovery/import, and migration. Do not expose this local file implementation as a cloud memory API or mark the overall architecture DONE.
