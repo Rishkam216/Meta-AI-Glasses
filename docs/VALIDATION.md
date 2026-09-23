@@ -1,5 +1,25 @@
 # Validation record
 
+## Durable context + stale refresh + orchestrator consumption — 2026-09-23
+
+Environment: portable Swift 6.x core; GitHub hosted runners currently unavailable before step execution.
+
+- Added `FileBackedContextService` as the durable local/offline `ContextStoring` reference implementation.
+- Durable writes use same-directory atomic replacement with a 0600 regular file, symlink refusal, owner checks, versioned decoding, corruption/size checks, and disk-before-memory mutation semantics.
+- Durable-context tests cover restart recovery, same context UUID in different tenant partitions, persisted deletion, tenant-local `removeAll`, corrupt-file refusal, symlink refusal, and file permissions.
+- Added application, connected-service, and device-runtime refresh adapter contracts plus `ContextRefreshCoordinator`.
+- Stale ephemeral context can be refreshed before compilation with bounded refresh work. Adapter output cannot choose tenant, scope, key, bindings, or trust; those remain deterministic application-owned fields.
+- Connected-service refresh is always classified as `external_content`; device/application refresh is system state. Cross-tenant refresh is rejected and ambiguous adapters fail closed.
+- Added explicit Context Compiler scopes and provider opt-ins. User scope, memory, external content, and model-generated context are not included by default.
+- Added `AgentInvocationContext`, which carries authenticated `TenantContext` separately from model-generated `ToolIntent`.
+- `AgentOrchestrator` now consumes tenant-safe compiled context only for ambiguous read-only bounded device decisions. Explicit-device, active-device, single-candidate, and ambiguous non-read paths remain deterministic and do not perform model/context selection work.
+- Candidate device scopes are included for bounded read selection, while external content, memory, model-generated content, user instructions, and other tenants remain excluded from the bounded decision context.
+- Added an orchestrator regression test proving another tenant's canary and injected external-content instruction are not present in the bounded decision's compiled context.
+- Added `.github/workflows/core-linux.yml` so portable AgentCore has a dedicated Linux CI lane separate from macOS-native validation.
+- The new `Portable core` hosted workflow currently fails before step 1 with zero steps because of the same account-side Actions runner restriction affecting macOS. This is an infrastructure/billing restriction, not a Swift compile/test failure.
+
+Conservative status: durable local context, stale-refresh boundaries, model-specific compilation, and bounded-decision orchestrator consumption are implemented. Cloud database/RLS isolation, real production application/connected-service adapters, session summarization/artifact handling, and realtime interface/model integration remain open.
+
 ## Context service + compiler — 2026-09-23
 
 Environment: Swift 6.2.1 on Linux x86_64.
@@ -15,7 +35,7 @@ Environment: Swift 6.2.1 on Linux x86_64.
 - Cross-tenant canary tests verify User A and User B cannot retrieve each other's context through direct lookup, query, compilation, or same-ID collisions.
 - Focused Linux package using the current production context source contracts plus hardening/regression tests: **35 tests passed, 0 failures**.
 
-This is still a portable/in-memory foundation. Durable persistence and database-level isolation are not implemented. Refresh adapter contracts exist and are tested with fakes, but real Mac/application/connected-service adapters and full orchestrator/realtime integration remain pending. The broad Context Service/session/device/task checklist items therefore remain conservatively open.
+This section records the earlier portable context milestone. Later sections above supersede its statements that durable persistence and orchestrator consumption were pending.
 
 ## Tenant + context-item foundation — 2026-09-23
 
@@ -76,8 +96,9 @@ This validates portable AgentCore behavior only. It does not validate AppKit, Ac
 - MacRuntime adapter tests (excluded from the Linux manifest).
 - Real foreground-app lookup, permission prompt/grant/revocation, or menu UI.
 - GitHub Actions run 35757635596 has repeatedly failed before any workflow step starts because the account-side macOS hosted-runner restriction remains active. No Swift build failure has been observed from that workflow.
+- The new Linux portable-core workflow also currently fails before step 1 with zero steps for the same hosted-runner account restriction.
 
-Therefore the project is **core-verified, native verification pending**. Do not describe it as a working, fully verified Mac app yet.
+Therefore the project is **portable-core verified at recorded milestones, native verification pending**. Do not describe it as a working, fully verified Mac app yet.
 
 ## Native gate
 
