@@ -85,12 +85,12 @@ import Testing
     try await store.put(state, tenant: owner, provenance: provenance)
 
     let ownerItems = await store.query(
-        ContextQuery(scopeKinds: [.session], keys: ["session_state"], includeStale: true),
+        try ContextQuery(scopeKinds: [.session], keys: ["session_state"], includeStale: true),
         as: owner,
         now: observed
     )
     let otherItems = await store.query(
-        ContextQuery(scopeKinds: [.session], keys: ["session_state"], includeStale: true),
+        try ContextQuery(scopeKinds: [.session], keys: ["session_state"], includeStale: true),
         as: other,
         now: observed
     )
