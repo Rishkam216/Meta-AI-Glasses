@@ -9,6 +9,8 @@ The user's handoff is authoritative; see [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 - Typed tool protocol, JSON result/error contract, runtime capability catalog.
 - Ephemeral approval foundation for future mutating tools: exact tool/arguments,
   device + session binding, short expiry, one-time use, and replay rejection.
+- Capability-based `DeviceRouter` plus `RuntimeDeviceExecutor`; routing is by
+  explicit device ID and advertised tools, never hard-coded OS pairings.
 - The Mac app still wires `DenyAllApprovals`, so no non-read tool can execute yet.
 - Permission preflight, explicit user-initiated Accessibility request.
 - Metadata-only JSONL audit log; failed initial audit prevents execution.
@@ -17,6 +19,7 @@ The user's handoff is authoritative; see [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 No model, voice, shell, file editing, network listener, cloud gateway, or glasses
 integration is implemented. Unimplemented tools are absent from the catalog.
 The approval store is infrastructure only; there is not yet a local approval UI.
+The device router is in-memory only; encrypted remote transport comes later.
 
 ## Build on your Mac
 
@@ -56,9 +59,10 @@ implemented; this milestone only generates logs on manual diagnostic calls.
 ## Verification
 
 `swift test` on Linux compiles/tests **AgentCore only**. The current core suite has
-15 passing tests: the original 10 runtime/audit/contract tests plus 5 approval tests.
-macOS targets are deliberately excluded on Linux; passing here does not validate
-AppKit, Accessibility, CoreGraphics, signing, TCC, or real desktop behavior.
+21 passing tests: 10 runtime/audit/contract tests, 5 approval tests, and 6 device
+routing tests. macOS targets are deliberately excluded on Linux; passing here does
+not validate AppKit, Accessibility, CoreGraphics, signing, TCC, or real desktop
+behavior.
 
 On a Mac with an interactive desktop, also run:
 
