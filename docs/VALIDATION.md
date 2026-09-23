@@ -1,23 +1,32 @@
 # Validation record
 
-## Device routing foundation — 2026-09-23
+## Orchestrator + decision engine — 2026-09-23
 
 Environment: Swift 6.2.1 on Linux x86_64.
 
-- Added `DeviceIdentity`, `DeviceExecuting`, `RuntimeDeviceExecutor`, `DeviceRouter`, and structured routing errors.
-- Ran `swift test -j 2` against the approval + routing branch.
-- **21 tests passed with zero failures**: 10 original runtime/audit/contract tests, 5 approval tests, and 6 device-routing tests.
-- Routing tests verify capability-based candidate selection independent of platform metadata, exact device/session context construction, approval forwarding, unknown-device rejection, unadvertised-capability rejection, duplicate-device rejection, and routing through a real `ToolRuntime` adapter.
-- `snapshots()` copies the registered executor collection before awaiting capability calls so actor reentrancy cannot mutate the dictionary mid-iteration.
+- Added provider-neutral `DecisionProvider`, deterministic `DecisionRule`, validated decision outcomes, bounded-confidence escalation, and `DecisionEngine`.
+- Added `AgentSession`, `ToolIntent`, and `AgentOrchestrator` on top of `DeviceRouter`.
+- Ran `swift test -j 2` against the complete stacked AgentCore branch.
+- **36 tests passed with zero failures**.
+- New decision tests verify deterministic rules run before bounded providers, a confident bounded decision avoids the reasoning provider, low-confidence/failing bounded decisions escalate correctly, invented options are rejected, and low-confidence output without a fallback fails closed.
+- New orchestrator tests verify explicit/active/single-device routing bypasses AI, ambiguous read routing requires explicit session opt-in, bounded selection can choose only among advertised read-only candidates, ambiguous non-read routing never invokes the bounded provider, inconsistent risk classification fails closed, and missing capabilities fail before decision.
+- Decision state is provider-neutral structured JSON. External adapters must curate it and must not dump credentials, raw unrelated conversation history, or unnecessary screen/file contents into a decision request.
+- No Jev/OpenAI/Claude SDK is linked yet. The future Jev adapter implements `DecisionProvider`; it does not become a security authority or execution layer.
 
 This validates portable AgentCore behavior only. It does not validate AppKit, Accessibility, CoreGraphics, codesigning, TCC, or interactive macOS behavior.
 
+## Device routing foundation — 2026-09-23
+
+- **21 tests passed with zero failures** at this milestone: 10 original runtime/audit/contract tests, 5 approval tests, and 6 device-routing tests.
+- Routing tests verify capability-based candidate selection independent of platform metadata, exact device/session context construction, approval forwarding, unknown-device rejection, unadvertised-capability rejection, duplicate-device rejection, and routing through a real `ToolRuntime` adapter.
+- `snapshots()` copies the registered executor collection before awaiting capability calls so actor reentrancy cannot mutate the dictionary mid-iteration.
+
 ## Core approval foundation — 2026-09-23
 
-- **15 tests passed with zero failures**: the original 10 runtime/audit/contract tests plus 5 approval tests.
+- **15 tests passed with zero failures** at this milestone: the original 10 runtime/audit/contract tests plus 5 approval tests.
 - Approval tests verify exact binding, one-time execution, replay rejection, argument tamper rejection, device/session binding, expiry, bounded TTL, and refusal to issue approval for read-only tools.
 - Existing tests still verify default refusal of all non-read actions when no trusted approval issuer is supplied.
-- The current Mac composition root still uses the default `DenyAllApprovals`, so this branch does not enable mutations.
+- The current Mac composition root still uses the default `DenyAllApprovals`, so these portable foundations do not enable mutations.
 
 ## Milestone 1 — 2026-09-22
 
