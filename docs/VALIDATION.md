@@ -5,13 +5,14 @@
 Environment: Swift 6.2.1 on Linux x86_64.
 
 - Added tenant-partitioned `InMemoryContextService`; writes reject ownership mismatch and reads/queries/deletes enter the exact `TenantContext` partition before any filtering.
+- Consolidated the stronger bounded-query semantics from the earlier `core/context-service` branch into this implementation: exact scope, scope-kind, key, trust, origin, session, device and task filters; validated 1–100 result limits; newest-first deterministic ordering; partition-local count/clear/remove; and support for the same context UUID existing independently in different principals.
 - Added typed `InterfaceContextState`, `SessionContextState`, `DeviceContextState`, and `TaskContextState`, all convertible to portable `ContextItem` values with preserved provenance/freshness/bindings.
 - Added `ContextCompiler` with same-session/device/task relevance filtering, stale-item exclusion, role-specific trust policy, deterministic item/byte budgets, and provider-facing output that omits tenant/user/account IDs while preserving trust/provenance labels.
 - Jev-style bounded decisions receive only `user_instruction`, `system_state`, and `tool_result` context by default; external content, memory, and model-generated context are excluded.
 - Reasoning context may include external content, but `external_content` remains explicit and is never rewritten as a user instruction.
 - Cross-tenant canary tests verify User A and User B cannot retrieve each other's context through direct lookup, query, or compilation.
 - Same-user but unrelated session/device/task context is filtered out by the compiler.
-- Exact focused context run: **27 tests passed, 0 failures**.
+- Exact focused context run after consolidation: **32 tests passed, 0 failures**.
 
 This is still a portable/in-memory foundation. Durable persistence, automatic stale-context refresh, connected-service/application adapters, long-term memory integration, and full orchestrator/realtime wiring remain pending. The broad Context Service checklist item therefore remains open.
 
