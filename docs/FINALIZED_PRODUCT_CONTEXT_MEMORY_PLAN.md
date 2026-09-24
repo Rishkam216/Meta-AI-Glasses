@@ -10,7 +10,13 @@ Do **not** mark an item `[x]` because a type, interface, placeholder, mock, or p
 
 The purpose of this document is to prevent shallow implementations that technically satisfy a name while missing the intended product behavior, isolation, migration, or security guarantees.
 
-Latest checkpoint (2026-09-24, durable write coordination): `core/memory-write-safety` implements `RevisionFencedMemoryProvider`, integrated with Memory Service through a durable principal/deployment-bound journal. Dispatch is claimed and fsynced before network I/O. Uncertain creates/deletes are observed, never blindly replayed; permanent deletion fences reject stale writes and resurrection. Deletion waits for strong remote settlement, strips the journal payload immediately, and remains pending until removal is confirmed. Missing/corrupt journals fail closed; provisioning is explicit for a fresh remote index.
+Latest checkpoint (2026-09-24, live validation harness): `test/supermemory-live-canaries` adds an opt-in Python vendor probe harness with eight synthetic documents across five tenant/user/account identities and three scopes. It creates temporary container-scoped credentials, requires positive retrieval controls, tests adversarial filtering and denied cross-user deletion, observes deletion during processing, checks document/memory/profile visibility, and records bounded cleanup. Run state is private, locked and fsynced; credentials are not saved, uncertain creates are not replayed, and production activation is never automatic.
+
+Validation: **18 offline harness tests passed**. The live invocation was attempted and stopped at `SUPERMEMORY_API_KEY_required` before any authenticated request. The last full Swift result remains 182 passing tests from the preceding milestone; Swift sources were not changed or rerun for this tooling-only change. The offline harness suite is now included in portable CI. No live integration pass is claimed.
+
+The full Supermemory milestone remains open. A test-organization API key is required to run the harness; the command can prompt privately in a local terminal. Vendor guarantees about delayed jobs and complete derived-data deletion remain a separate requirement, and a finite passing run cannot establish them. See `SUPERMEMORY_LIVE_VALIDATION.md` for exact commands, coverage limits, cleanup, and the four concrete vendor questions. No vendor message has been sent.
+
+Previous checkpoint (2026-09-24, durable write coordination): `core/memory-write-safety` implements `RevisionFencedMemoryProvider`, integrated with Memory Service through a durable principal/deployment-bound journal. Dispatch is claimed and fsynced before network I/O. Uncertain creates/deletes are observed, never blindly replayed; permanent deletion fences reject stale writes and resurrection. Deletion waits for strong remote settlement, strips the journal payload immediately, and remains pending until removal is confirmed. Missing/corrupt journals fail closed; provisioning is explicit for a fresh remote index.
 
 Full portable validation: **182 tests passed, 0 failures**, including 18 new real-file/coordinator tests for restart replay, lost responses, deletion while a worker is paused before upload, concurrent identical retries, late observations, cancellation, payload removal, malformed identities, capability gates and Memory Service integration. The remote lifecycle is simulated under an explicit driver contract. This proves local coordination under that contract, not Supermemory's server lifecycle or cloud isolation.
 
@@ -888,6 +894,8 @@ Exact API shape can evolve, but provider-specific types must remain behind the a
 - [ ] Supermemory adapter.
 - [x] Supermemory read-only search/transport foundation with capability gate and portable tests (2026-09-23).
 - [x] Durable local revision coordinator and Memory Service integration tested against a lifecycle-contract simulator (2026-09-24).
+- [x] Opt-in Supermemory API canary harness, offline harness tests and private-key runbook (2026-09-24).
+- [ ] Authenticated canary run with live results and resolved cleanup.
 - [ ] Supermemory driver lifecycle guarantees, mutation receipts and live isolation/deletion validation.
 - [x] Provider-independent tests.
 - [x] Provider feature/capability reporting.

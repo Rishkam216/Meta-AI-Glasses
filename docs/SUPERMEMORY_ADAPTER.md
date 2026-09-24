@@ -52,3 +52,7 @@ Next: resolve the durable write-fence mechanism, implement mutation/receipt hand
 The generic durable coordinator is now implemented and integrated with Memory Service; see `MEMORY_WRITE_SAFETY.md`. It supplies one-shot mutation dispatch, monotonic revisions, persistent deletion fences, outcome reconciliation and pending-deletion retrieval suppression. The full suite passes 182 portable tests.
 
 This does not enable direct Supermemory writes. Its driver must first establish strong upload settlement and complete deletion semantics, including delayed jobs and derived copies. No such guarantee is inferred merely from document `status`, `dreamingStatus`, `latestRevision`, `activeContentUpdateId` or `tombstonedAt`. A missing credential blocks live testing; the lifecycle guarantee is a separate blocker.
+
+## Runnable live probes (2026-09-24)
+
+`SUPERMEMORY_LIVE_VALIDATION.md` now documents the opt-in vendor canary harness. Eighteen offline harness tests pass; the actual live command stopped before authenticated I/O because no API key is configured. It tests fresh synthetic partitions, scopes, scoped-key boundaries and bounded deletion visibility/cleanup, while explicitly retaining `production_ready: false`. This adds no production mutation-driver capability and supplies no undocumented lifecycle guarantee.

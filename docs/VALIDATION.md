@@ -1,5 +1,12 @@
 # Validation record
 
+## Supermemory live canary tooling — 2026-09-24
+
+- `python3 -m unittest discover -s scripts/tests -v` — **18 offline tests passed**. Fixtures cover the complete HTTP-shaped flow, five-principal/three-scope planning, positive controls, foreign result refusal, denied cross-user deletion, lost create response cleanup without replay, retained derived entries, failed cleanup with key revocation, metadata ownership checks, private state/locking/tampering, dispatch-before-send persistence, credential redaction, no-key/no-opt-in refusal and transport response limits.
+- Actual CLI plan creation succeeded. Live CLI with opt-in exited **2**, reporting `SUPERMEMORY_API_KEY_required` before authenticated network I/O. No live result is available.
+- Production Swift sources are unchanged; the preceding full Swift result is 182 passing tests, not rerun for this tooling-only change. Offline Python tests were added to the portable CI workflow; hosted execution is not claimed.
+- `git diff --check` passed. No temporary test state, credentials or response bodies are committed. The harness never enables production writes; lifecycle evidence remains unverified even after a future passing probe run.
+
 ## Durable write coordination — 2026-09-24
 
 - Full Swift 6.2.1 / Ubuntu 24.04 package: `swift test -j 2` — **182 tests passed, 0 failures**, no compiler warnings.

@@ -8,3 +8,7 @@ xcuserdata/
 .env.*
 !.env.example
 *.jsonl
+
+__pycache__/
+*.py[cod]
+.canary-runs*/

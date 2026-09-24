@@ -20,3 +20,5 @@ jobs:
         run: swift --version
       - name: Test portable AgentCore
         run: swift test -j 2
+      - name: Test live-canary harness offline
+        run: python3 -m unittest discover -s scripts/tests -v
