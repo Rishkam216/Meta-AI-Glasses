@@ -111,6 +111,32 @@ class CanaryTests(unittest.TestCase):
         self.assertIn("adversarial_namespace_scope_filters", checks)
         self.assertEqual(self.store.load()["run"], self.state["run"])
 
+    def test_smoke_creates_only_one_document_and_never_mints_keys(self):
+        self.assertTrue(self.runner.smoke())
+        self.assertEqual(self.vendor.created_count, 1)
+        self.assertEqual(self.vendor.docs, {})
+        self.assertLessEqual(len(self.vendor.calls), 30)
+        self.assertFalse(any("auth/scoped-key" in x[1] for x in self.vendor.calls))
+        self.assertEqual(self.state["phase"], "smoke_observed_pass")
+        self.assertFalse(self.state["production_ready"])
+        self.assertEqual(self.store.load()["mode"], "smoke")
+        with self.assertRaisesRegex(c.ProbeError, "run_replay_refused"):
+            self.runner.smoke()
+
+    def test_smoke_failed_search_still_deletes_its_document(self):
+        self.vendor.empty_search = True
+        self.assertFalse(self.runner.smoke())
+        self.assertEqual(self.vendor.docs, {})
+        self.assertEqual(self.vendor.created_count, 1)
+        self.assertTrue(self.state["cleanup_observed"])
+
+    def test_smoke_uncertain_create_is_not_replayed(self):
+        self.vendor.lost_create = True
+        self.assertFalse(self.runner.smoke())
+        self.assertEqual(self.vendor.created_count, 1)
+        self.assertEqual(self.vendor.docs, {})
+        self.assertTrue(self.state["cleanup_observed"])
+
     def test_empty_search_cannot_pass_positive_controls(self):
         self.vendor.empty_search = True
         self.assertFalse(self.runner.run())
@@ -257,6 +283,12 @@ class TransportTests(unittest.TestCase):
             with self.assertRaisesRegex(c.ProbeError, "request_budget_exhausted"):
                 c.HTTP(requests=0).request("GET", "/v3/documents/x", "TOKEN")
             constructor.assert_not_called()
+
+    def test_dns_failure_is_distinct_and_redacted(self):
+        with patch.object(c.http.client, "HTTPSConnection") as constructor:
+            constructor.return_value.request.side_effect = c.socket.gaierror(-3, "private TOKEN")
+            with self.assertRaisesRegex(c.ProbeError, "^network_dns_failure$"):
+                c.HTTP().request("POST", "/v3/search", "TOKEN", {})
 
 
 if __name__ == "__main__": unittest.main()

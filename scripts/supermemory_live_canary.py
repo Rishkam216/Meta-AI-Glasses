@@ -14,6 +14,7 @@ import math
 import os
 from pathlib import Path
 import re
+import socket
 import stat
 import sys
 import time
@@ -186,6 +187,7 @@ class HTTP:
             check(isinstance(value, dict), "invalid_json_shape")
             return response.status, value
         except ProbeError: raise
+        except socket.gaierror: raise ProbeError("network_dns_failure") from None
         except Exception: raise ProbeError("transport_or_json_failure") from None
         finally: conn.close()
 
@@ -417,6 +419,39 @@ class Canary:
         self.save()
         return complete
 
+    def smoke(self):
+        """One document, no key minting, <=20 probe + 10 cleanup requests."""
+        check(self.state["phase"] == "planned", "run_replay_refused_use_cleanup")
+        if isinstance(self.http, HTTP): self.http = HTTP(seconds=120, requests=20)
+        self.state.update(phase="running", mode="smoke", request_limit=30)
+        self.save()
+        self.credentials["owner"] = self.master
+        self.rounds = min(self.rounds, 6)
+        passed = False
+        try:
+            doc = self.state["documents"][0]
+            self.ingest(doc)
+            self.wait_ready(doc)
+            _, value = self.call("POST", "/v3/search", body=self.search_body(doc))
+            check(doc["id"] in self.validate_hits(value.get("results"), [doc]),
+                  "positive_search_control_missing")
+            self.event("single_document_ingestion_retrieval", "passed")
+            passed = True
+        except Exception as error:
+            self.event("smoke_checks", "failed", code=str(error) if isinstance(error, ProbeError)
+                       else "local_or_response_failure")
+        finally:
+            if isinstance(self.http, HTTP):
+                self.state["probe_requests_attempted"] = 20 - self.http.remaining
+                self.http = HTTP(seconds=120, requests=10)
+            clean = self.cleanup()
+            if isinstance(self.http, HTTP):
+                self.state["cleanup_requests_attempted"] = 10 - self.http.remaining
+            self.credentials.clear()
+            self.state["phase"] = "smoke_observed_pass" if passed and clean else "incomplete_or_failed"
+            self.save()
+        return passed and clean
+
     def run(self):
         check(self.state["phase"] == "planned", "run_replay_refused_use_cleanup")
         self.state["phase"] = "running"
@@ -457,7 +492,7 @@ class Canary:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "run", "cleanup"))
+    parser.add_argument("action", choices=("plan", "smoke", "run", "cleanup"))
     parser.add_argument("--state-dir", required=True)
     parser.add_argument("--prompt-key", action="store_true", help="Read the API key privately from an interactive terminal")
     parser.add_argument("--poll-rounds", type=int, default=20, choices=range(1, 31))
@@ -482,9 +517,12 @@ def main(argv=None):
             secret = getpass.getpass("Supermemory test-organization API key: ")
         check(bool(secret), "SUPERMEMORY_API_KEY_required")
         master = token(secret)
-        runner = Canary(state, store, HTTP(), master, args.poll_rounds, args.poll_interval)
-        success = runner.run() if args.action == "run" else runner.cleanup()
+        smoke_budget = args.action == "smoke" or state.get("mode") == "smoke"
+        http = HTTP(seconds=120, requests=20 if args.action == "smoke" else 10) if smoke_budget else HTTP()
+        runner = Canary(state, store, http, master, args.poll_rounds, args.poll_interval)
+        success = runner.smoke() if args.action == "smoke" else runner.run() if args.action == "run" else runner.cleanup()
         store.save({"run": state["run"], "result": "observed_pass" if success else "incomplete_or_failed",
+                    "mode": state.get("mode", "full"),
                     "production_ready": False, "lifecycle_guarantee": "unverified",
                     "events": state["events"], "cleanup_observed": state.get("cleanup_observed", False)}, "report.json")
         print("Observations saved. Production writes remain disabled.")

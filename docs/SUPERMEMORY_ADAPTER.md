@@ -56,3 +56,5 @@ This does not enable direct Supermemory writes. Its driver must first establish 
 ## Runnable live probes (2026-09-24)
 
 `SUPERMEMORY_LIVE_VALIDATION.md` now documents the opt-in vendor canary harness. Eighteen offline harness tests pass; the actual live command stopped before authenticated I/O because no API key is configured. It tests fresh synthetic partitions, scopes, scoped-key boundaries and bounded deletion visibility/cleanup, while explicitly retaining `production_ready: false`. This adds no production mutation-driver capability and supplies no undocumented lifecycle guarantee.
+
+Low-budget validation update (2026-09-24): the harness now has a one-document smoke mode with a 30-request total cap, including cleanup. A supplied credential could not be validated: the attempted create and scoped cleanup lookup failed at transport, and a separate diagnostic confirmed vendor DNS failure in this workspace. No successful vendor response or cleanup is claimed. All 22 offline harness tests pass; production write gates remain unchanged.

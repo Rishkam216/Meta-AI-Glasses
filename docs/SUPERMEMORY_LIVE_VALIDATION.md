@@ -1,6 +1,21 @@
 # Supermemory live API validation
 
-Status (2026-09-24): the runnable vendor probe harness is implemented and passes 18 offline tests. An actual invocation with live opt-in stopped at `SUPERMEMORY_API_KEY_required`, before any authenticated request. **No live result is claimed and production writes remain disabled.**
+Status (2026-09-24): **22 offline tests pass**. A credentialed one-document smoke attempt ended with transport failures on its create and cleanup lookup (two attempts total); no vendor response or remote ID was received. A separate unauthenticated diagnostic confirmed vendor-host DNS failure (`gaierror`, errno -3). Cleanup is unconfirmed and the uncertain create must not be replayed. The credential was not saved. No live pass, balance measurement or billing amount is claimed. Production writes remain disabled.
+
+## Small-budget smoke test
+
+Start here when credits are limited. This uses one short synthetic document, the supplied organization credential, no temporary keys, at most six readiness polls, one positive search, and bounded scoped cleanup. It does not test isolation, all scopes, or deletion races. The full eight-document suite below remains a separate explicit command.
+
+```bash
+python3 scripts/supermemory_live_canary.py plan --state-dir .canary-runs-smoke
+SUPERMEMORY_LIVE_TESTS=1 python3 scripts/supermemory_live_canary.py smoke --state-dir .canary-runs-smoke --prompt-key --poll-rounds 6 --poll-interval 8
+```
+
+The plan lists all fixtures, but smoke dispatches only the first. Smoke enforces at most 20 probe requests plus 10 cleanup requests, each phase with a 120-second budget. Explicit later cleanup of this state is limited to ten requests per invocation. There are no automatic upload retries. Interrupted/uncertain creates require cleanup on the same state directory, never another smoke invocation. Reports distinguish `mode: smoke` from full-suite observations.
+
+[Published pricing](https://supermemory.ai/pricing/) reviewed 2026-09-24 lists plain-text memory at $5 per million SM tokens, search at $5 per million queries, and operations at $100 per million operations. One under-200-character document and these bounded calls suggest a cost well below $0.01, but SM token accounting and actual billing cannot be verified by this harness. A request cap is not a vendor-enforced dollar cap. No top-up or billing settings are changed.
+
+The attempted workspace run is retained locally in `.canary-runs-budget-one`. It ended before any successful vendor response; do not treat its cleanup as confirmed. DNS/network access must work before further live testing. Rotate a credential shared in chat and use the non-echoing prompt for future runs.
 
 ## Run the probes
 
