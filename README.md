@@ -80,3 +80,7 @@ See [docs/VALIDATION.md](docs/VALIDATION.md) for actual results and the remainin
 native checks. See [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md) for the decision
 and routing contract. Do not add a mutating native tool until the macOS build gate
 passes and a trusted local approval UI is wired to the approval store.
+
+## Backend isolation
+
+The PostgreSQL-backed memory storage API, opaque-session authentication boundary, forced row-level security and scoped lexical cache are implemented under [backend](backend/README.md). Run its independent database/HTTP isolation suite with `cd backend && npm ci --ignore-scripts && npm test`. This module is not yet wired to the Swift canonical ledger or deployed; the backend README specifies the remaining gates.

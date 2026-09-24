@@ -1,5 +1,14 @@
 # Validation record
 
+## Backend isolation — 2026-09-24
+
+- `cd backend && npm test`: **27 passed, 0 failed, 3 skipped**. SQL migration and RLS run on PostgreSQL 18.3 via PGlite 0.5.8, Node 24.19.0. These are real database-engine tests plus HTTP/pool boundary tests, not mocked SQL policies.
+- Covered: five principal identities, same IDs across owners, unfiltered reads, all-pairs foreign searches with positive controls, scoped exports/deletes/tombstones, expired/revoked/forged sessions, identity-setting spoofing, denied private-table/session-mint/table-write access, RLS insert checks, immutable ownership, cache partitioning/invalidation/re-resolution/eviction, HTTP bounds and safe errors, pooled-connection rollback behavior and unsafe-login checks.
+- Three tests explicitly skip in PGlite: real PostgreSQL login role escalation, concurrent cache population/deletion and revocation during an in-flight transaction. `.github/workflows/backend-isolation.yml` runs the same suite against a native PostgreSQL service to cover them. Native results are pending, not inferred from embedded tests.
+- `npm audit --omit=dev --audit-level=high`: zero reported vulnerabilities in runtime dependencies at validation time.
+- Swift and Supermemory files were unchanged and those suites were not rerun in this slice. No vendor calls or cloud deployment occurred. A full Swift ledger bridge and real identity-provider integration remain pending; see `backend/README.md`.
+
+
 ## Supermemory live canary tooling — 2026-09-24
 
 - `python3 -m unittest discover -s scripts/tests -v` — **22 offline tests passed**. Fixtures cover the complete HTTP-shaped flow, five-principal/three-scope planning, positive controls, foreign result refusal, denied cross-user deletion, lost create response cleanup without replay, retained derived entries, failed cleanup with key revocation, metadata ownership checks, private state/locking/tampering, dispatch-before-send persistence, credential redaction, no-key/no-opt-in refusal and transport response limits.

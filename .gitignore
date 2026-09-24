@@ -12,3 +12,4 @@ xcuserdata/
 __pycache__/
 *.py[cod]
 .canary-runs*/
+node_modules/

@@ -10,7 +10,15 @@ Do **not** mark an item `[x]` because a type, interface, placeholder, mock, or p
 
 The purpose of this document is to prevent shallow implementations that technically satisfy a name while missing the intended product behavior, isolation, migration, or security guarantees.
 
-Latest checkpoint (2026-09-24, live validation harness): `test/supermemory-live-canaries` adds an opt-in Python vendor probe harness with eight synthetic documents across five tenant/user/account identities and three scopes. It creates temporary container-scoped credentials, requires positive retrieval controls, tests adversarial filtering and denied cross-user deletion, observes deletion during processing, checks document/memory/profile visibility, and records bounded cleanup. Run state is private, locked and fsynced; credentials are not saved, uncertain creates are not replayed, and production activation is never automatic.
+Latest checkpoint (2026-09-24, backend isolation): `core/backend-isolation` adds the repository's first PostgreSQL-backed storage API in `backend/`. It derives tenant/user/optional-account identity from opaque server-issued sessions, enforces ENABLE + FORCE RLS with a separate non-owner mutation role, rejects request-supplied identities, and prevents runtime access to session issuance/private session tables. Memory records are immutable; reads, writes, deletions, tombstones and paged exports are principal-scoped. The HTTP boundary, PostgreSQL transaction adapter and separate trusted session issuer are implemented.
+
+The working lexical retrieval cache is partitioned by principal, scope, query and limit. Cache entries hold only IDs, expire, and are bounded per principal. Writes/deletes invalidate the cache and advance its revision in the same transaction; principal-scoped advisory locking coordinates population with deletion. Results are re-resolved under RLS and scope checks.
+
+Validation: **27 backend tests passed, 0 failed, 3 native-only tests skipped** on PostgreSQL 18.3 via PGlite 0.5.8 / Node 24.19.0. This executes actual PostgreSQL SQL/RLS rather than a mock. Tests exercise five independently varying principal identities, unfiltered SQL, all cross-principal canary searches, exports/deletion, malformed sessions, expiry/revocation, identity forgery, role/table permissions, cache invalidation/poisoning and pooled transaction cleanup. A separate native PostgreSQL CI job is added for real-login privilege escalation and multi-connection cache/deletion/revocation races; no native pass is claimed yet. Production dependency audit reported zero vulnerabilities. Swift and Supermemory code were not changed or rerun in this slice.
+
+The broad database/provider/cache isolation milestone remains open: this storage API is not yet connected to a real identity provider or the native Swift MemoryServiceLedger. Its record/provenance/tombstone page format does not implement the full Swift lineage, supersession, provider-work queue or portable v3 snapshot contract. Search is lexical, not vector/semantic retrieval. No cloud database was deployed and no Supermemory requests were made. Next: pass the native database gate and integrate the complete canonical ledger/authentication path before claiming end-to-end cloud isolation. See `backend/README.md` for implementation, deployment gates and exact limitations. Supermemory live testing remains deferred until the user is on Mac.
+
+Previous checkpoint (2026-09-24, live validation harness): `test/supermemory-live-canaries` adds an opt-in Python vendor probe harness with eight synthetic documents across five tenant/user/account identities and three scopes. It creates temporary container-scoped credentials, requires positive retrieval controls, tests adversarial filtering and denied cross-user deletion, observes deletion during processing, checks document/memory/profile visibility, and records bounded cleanup. Run state is private, locked and fsynced; credentials are not saved, uncertain creates are not replayed, and production activation is never automatic.
 
 Validation: **22 offline harness tests passed**. A user-authorized low-budget smoke run was attempted with a supplied credential kept only in process memory. It attempted one create and one scoped cleanup lookup; both returned transport failures, with no remote ID or successful vendor response. An unauthenticated diagnostic confirmed DNS resolution failure (`gaierror`, errno -3) for `api.supermemory.ai`. Cleanup remains unconfirmed; the uncertain create is never replayed. The new smoke mode caps each invocation at one short document, no key minting, and 30 total request attempts including cleanup. The full live suite was not run; actual billing is unavailable. The last full Swift result remains 182 passing tests from the preceding milestone; Swift sources were not changed or rerun for this tooling-only change. The offline harness suite is now included in portable CI. No live integration pass is claimed.
 
@@ -1229,9 +1237,13 @@ Do not copy raw private memories into global analytics tables.
 - [x] TenantContext type/contract.
 - [x] Tenant context required by memory APIs.
 - [ ] Database-level row isolation.
+- [x] PostgreSQL storage API with forced RLS, principal-scoped identities/constraints and executable engine tests (2026-09-24).
+- [x] Opaque session-derived backend identity, separate issuer/runtime roles and request identity-spoof rejection (2026-09-24).
+- [ ] Native database login/concurrency gate, real identity-provider enrollment and complete Swift ledger integration.
 - [ ] Provider namespace isolation.
 - [ ] Tenant-scoped vector retrieval.
 - [ ] Tenant-scoped cache keys.
+- [x] Principal/scope/query/limit-partitioned backend lexical cache with transactional invalidation and RLS re-resolution (2026-09-24).
 - [ ] Tenant-scoped jobs.
 - [ ] Tenant-scoped artifacts.
 - [ ] Safe logging policy.
@@ -1286,13 +1298,16 @@ Run these tests across:
 ## Implementation checklist
 
 - [ ] Cross-tenant canary fixture.
+- [x] Five-principal PostgreSQL/HTTP canary suite covering tenant, user, account, absent-account and scope isolation (2026-09-24).
 - [ ] Direct-search isolation tests.
 - [ ] Semantic-search isolation tests.
 - [x] Context-compiler isolation tests.
 - [ ] Cache isolation tests.
+- [x] Backend cache isolation, poisoned-ID re-resolution, deletion invalidation, expiry/revocation and bounded eviction tests (2026-09-24).
 - [ ] Job isolation tests.
 - [ ] Migration isolation tests.
 - [ ] Export isolation tests.
+- [x] Backend storage-page export and tombstone isolation tests (2026-09-24); complete canonical/migration exports remain separate.
 
 ---
 
