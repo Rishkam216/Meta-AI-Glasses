@@ -48,3 +48,9 @@ Provider IDs identify deployments/index generations (for example `vendor.product
 The complete portable suite passes 152 tests, including 26 new service/provider tests. Tests use a revision-fenced contract double, plus actual file-backed restart and corruption tests. They prove the service/ledger behavior; they do not prove any vendor implements the contract.
 
 The Supermemory read-only adapter foundation is now implemented separately (see `SUPERMEMORY_ADAPTER.md`), but its false revision-fencing capability intentionally prevents enrollment. Full Supermemory mutation support, live API validation, cloud database isolation, Context Compiler retrieval wiring, native app composition, deployment workers, provider-wide deletion verification and full migration remain open. No external memory service has been contacted or configured by this milestone.
+
+## Durable coordinator integration (2026-09-24)
+
+`RevisionFencedMemoryProvider` now implements the mandatory revision/deletion fence using an authoritative local journal and a lower-level `MemoryMutationDriver`. It performs at most one remote call per apply, retains uncertain dispatches rather than resending them, and returns receipts only for the exact current operation after strong settlement/removal. `MemoryService.synchronize` preserves safe provider error categories such as `operationPending`, so pending processing is distinguishable from a generic outage.
+
+A driver must prove its strong remote lifecycle semantics before this wrapper can be constructed. This is not a flag to enable the direct Supermemory adapter. The full package now passes 182 portable tests; the actual Supermemory lifecycle remains unverified. See `MEMORY_WRITE_SAFETY.md` for implementation, recovery restrictions and the remaining blocker.

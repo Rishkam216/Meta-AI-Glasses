@@ -142,7 +142,7 @@ public actor FileBackedMemoryLedger: MemoryServiceLedger {
 /// All operations are synchronous and hold the advisory lock without suspension.
 /// Directory-relative syscalls pin the directory and refuse symlink traversal.
 /// The lock file must never be unlinked while this store is in use.
-private final class LockedMemoryFile: Sendable {
+final class LockedMemoryFile: Sendable {
     private let directoryFD: Int32
     private let name: String
     private let maxFileBytes: Int

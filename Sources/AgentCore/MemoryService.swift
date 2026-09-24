@@ -136,6 +136,7 @@ public actor MemoryService {
                 let receipt: MemoryProviderReceipt
                 do { receipt = try await provider.apply(mutation) }
                 catch is CancellationError { throw CancellationError() }
+                catch let error as MemoryProviderError { throw error }
                 catch { throw MemoryProviderError.unavailable }
                 guard receipt.namespace == namespace, receipt.canonicalID == entry.memoryID,
                       receipt.revision == entry.revision, receipt.operationID == entry.operationID,

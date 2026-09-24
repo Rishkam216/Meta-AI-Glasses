@@ -46,3 +46,9 @@ Portable tests use the documented response shape, an injected transport and a lo
 No live API key is configured in this environment. No authenticated vendor requests, ingestion, deletion, profile calls or live isolation tests were performed. Tests do not certify remote filter enforcement or cross-user isolation. Native macOS URLSession behavior remains to be checked on macOS.
 
 Next: resolve the durable write-fence mechanism, implement mutation/receipt handling against it, and run credential-scoped live canaries for two tenants/users/accounts and multiple scopes, including delayed upsert after deletion, crash/restart replay, provider outage, eventual indexing and deletion completion. Then integrate the proven adapter with MemoryService. Cloud RLS and context/compiler wiring remain separate later milestones.
+
+## Write-coordination progress (2026-09-24)
+
+The generic durable coordinator is now implemented and integrated with Memory Service; see `MEMORY_WRITE_SAFETY.md`. It supplies one-shot mutation dispatch, monotonic revisions, persistent deletion fences, outcome reconciliation and pending-deletion retrieval suppression. The full suite passes 182 portable tests.
+
+This does not enable direct Supermemory writes. Its driver must first establish strong upload settlement and complete deletion semantics, including delayed jobs and derived copies. No such guarantee is inferred merely from document `status`, `dreamingStatus`, `latestRevision`, `activeContentUpdateId` or `tombstonedAt`. A missing credential blocks live testing; the lifecycle guarantee is a separate blocker.

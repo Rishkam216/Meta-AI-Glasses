@@ -10,7 +10,13 @@ Do **not** mark an item `[x]` because a type, interface, placeholder, mock, or p
 
 The purpose of this document is to prevent shallow implementations that technically satisfy a name while missing the intended product behavior, isolation, migration, or security guarantees.
 
-Latest checkpoint (2026-09-23, Supermemory read-only adapter foundation): `core/supermemory-adapter` adds a principal-bound, explicitly enabled diagnostic search adapter and bounded HTTPS transport. Requests constrain container, namespace metadata, deployment and scope before remote retrieval; responses expose only validated canonical references and scores. Defaults disable reads. Writes/deletes and profiles are unsupported; `idempotentRevisionFencing` remains false, so Memory Service correctly rejects enrollment.
+Latest checkpoint (2026-09-24, durable write coordination): `core/memory-write-safety` implements `RevisionFencedMemoryProvider`, integrated with Memory Service through a durable principal/deployment-bound journal. Dispatch is claimed and fsynced before network I/O. Uncertain creates/deletes are observed, never blindly replayed; permanent deletion fences reject stale writes and resurrection. Deletion waits for strong remote settlement, strips the journal payload immediately, and remains pending until removal is confirmed. Missing/corrupt journals fail closed; provisioning is explicit for a fresh remote index.
+
+Full portable validation: **182 tests passed, 0 failures**, including 18 new real-file/coordinator tests for restart replay, lost responses, deletion while a worker is paused before upload, concurrent identical retries, late observations, cancellation, payload removal, malformed identities, capability gates and Memory Service integration. The remote lifecycle is simulated under an explicit driver contract. This proves local coordination under that contract, not Supermemory's server lifecycle or cloud isolation.
+
+The Supermemory adapter milestone remains open. Direct writes are still disabled: an actual driver must establish that upload settlement drains delayed processing and deletion removes all related copies without recreation. No API key is configured, and a key alone does not supply that guarantee. Next: obtain/prove those vendor lifecycle semantics and validate them live, or select a backend whose transaction/worker lifecycle we control. See `MEMORY_WRITE_SAFETY.md` for the implemented mechanism, safety argument and availability/recovery limits.
+
+Previous checkpoint (2026-09-23, Supermemory read-only adapter foundation): `core/supermemory-adapter` adds a principal-bound, explicitly enabled diagnostic search adapter and bounded HTTPS transport. Requests constrain container, namespace metadata, deployment and scope before remote retrieval; responses expose only validated canonical references and scores. Defaults disable reads. Writes/deletes and profiles are unsupported; `idempotentRevisionFencing` remains false, so Memory Service correctly rejects enrollment.
 
 Full portable validation: **164 tests passed, 0 failures**, including 12 new tests (with parameterized cases) for request filters, ownership/scope encoding, malformed/foreign responses, HTTP limits, cancellation and fail-closed capability gates. The live API specification was reviewed; it does not document the durable conditional revision/deletion guarantee required by our contract. No API key is configured and no authenticated vendor calls were made. The full Supermemory adapter checkbox stays open. Next: prove an enforcing write-fence mechanism, implement mutations against it, then run live isolation/retry/deletion canaries. See `SUPERMEMORY_ADAPTER.md` for the API evidence, metadata convention and exact blocker.
 
@@ -881,7 +887,8 @@ Exact API shape can evolve, but provider-specific types must remain behind the a
 - [x] Memory Service.
 - [ ] Supermemory adapter.
 - [x] Supermemory read-only search/transport foundation with capability gate and portable tests (2026-09-23).
-- [ ] Supermemory durable write fencing, mutation receipts and live isolation/deletion validation.
+- [x] Durable local revision coordinator and Memory Service integration tested against a lifecycle-contract simulator (2026-09-24).
+- [ ] Supermemory driver lifecycle guarantees, mutation receipts and live isolation/deletion validation.
 - [x] Provider-independent tests.
 - [x] Provider feature/capability reporting.
 

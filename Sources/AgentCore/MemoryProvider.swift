@@ -8,6 +8,9 @@ public enum MemoryProviderError: Error, Sendable, Equatable {
     case unavailable
     case documentTooLarge
     case synchronizationBusy
+    case operationPending
+    case staleRevision
+    case mutationConflict
 }
 
 /// Identifies a stable provider deployment/index generation, not merely a vendor.

@@ -1,5 +1,13 @@
 # Validation record
 
+## Durable write coordination — 2026-09-24
+
+- Full Swift 6.2.1 / Ubuntu 24.04 package: `swift test -j 2` — **182 tests passed, 0 failures**, no compiler warnings.
+- Added 18 tests using real journal files and a remote lifecycle-contract simulator: durable replay; permanent tombstones; crash immediately after dispatch claim; lost create/delete responses; processing versus settlement; indefinite uncertain deletion; deletion while the original worker is paused before create; concurrent identical retries; late responses after deletion; cancellation with outcome persistence; immutable-content/revision conflicts; payload stripping; principal/deployment/corrupt/missing-file refusal; malformed provider IDs; size/invalid-mutation rollback; and unverified-driver rejection.
+- Memory Service integration verifies pending work is not acknowledged, safe pending errors remain visible, and confirmed operations map/acknowledge once. Retrieval hides fenced records during pending remote deletion.
+- Reused the existing secure filesystem primitive without changing its behavior; previous ledger tests still pass. `git diff --check` passed.
+- These tests establish local coordination under the driver lifecycle contract. No live Supermemory write driver, vendor completion guarantee, cloud database isolation or macOS validation is claimed. No API key is configured. See `MEMORY_WRITE_SAFETY.md`.
+
 ## Supermemory read-only adapter foundation — 2026-09-23
 
 - Complete package on Swift 6.2.1 / Ubuntu 24.04: `swift test -j 2` — **164 tests passed, 0 failures**.
