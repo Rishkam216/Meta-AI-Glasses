@@ -24,6 +24,22 @@ export async function createTestDatabase() {
   if (!['localhost','127.0.0.1','[::1]'].includes(url.hostname) || url.pathname !== '/agent_isolation_test')
     throw new Error('disposable_local_test_database_required');
   const adminPool = new pg.Pool({ connectionString: url.href });
+
+  // Each node:test file owns its own database fixture. The native PostgreSQL
+  // service is shared across those files, unlike PGlite, so remove the prior
+  // fixture before replaying the one-time bootstrap migration. This is restricted
+  // to the explicitly named disposable local test database above.
+  await adminPool.query(`
+    DROP SCHEMA IF EXISTS agent_canonical CASCADE;
+    DROP SCHEMA IF EXISTS agent_api CASCADE;
+    DROP SCHEMA IF EXISTS agent_data CASCADE;
+    DROP SCHEMA IF EXISTS agent_private CASCADE;
+    DROP ROLE IF EXISTS agent_runtime;
+    DROP ROLE IF EXISTS agent_auth;
+    DROP ROLE IF EXISTS agent_writer;
+    DROP ROLE IF EXISTS agent_owner;
+  `);
+
   for (const migration of migrations) await adminPool.query(migration);
   await adminPool.query("ALTER ROLE agent_runtime LOGIN PASSWORD 'test-runtime-only'; ALTER ROLE agent_auth LOGIN PASSWORD 'test-auth-only'");
   const pool = (role, password) => {
