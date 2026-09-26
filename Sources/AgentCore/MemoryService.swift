@@ -209,7 +209,10 @@ public actor MemoryService {
     }
 
     private func canonicalContextSearch(_ query: MemoryContextQuery) async throws -> [RetrievedMemory] {
-        let candidateLimit = min(100, max(query.limit * 4, 24))
+        // Canonical fallback is intentionally bounded but ranks across the full
+        // available ledger page per requested scope instead of pre-truncating the
+        // candidate set based on the desired result count.
+        let candidateLimit = 100
         let scopes = query.scopes.sorted {
             if $0.kind.rawValue != $1.kind.rawValue {
                 return $0.kind.rawValue < $1.kind.rawValue
