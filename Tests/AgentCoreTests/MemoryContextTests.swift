@@ -50,6 +50,7 @@ private func memoryCompilationRequest(
     includeUserScope: Bool = true,
     maxItems: Int = 32,
     maxBytes: Int = 32_768,
+    memoryLimit: Int = 8,
     memoryMaxBytes: Int = 16_384,
     consumer: ContextConsumerKind = .reasoning
 ) throws -> ContextCompilationRequest {
@@ -63,7 +64,7 @@ private func memoryCompilationRequest(
         memoryQuery: MemoryContextQuery(
             text: text,
             scopes: scopes,
-            limit: min(8, maxItems),
+            limit: memoryLimit,
             maxBytes: memoryMaxBytes
         )
     )
@@ -89,7 +90,7 @@ private struct FixedMemoryContextRetriever: MemoryContextRetrieving {
 private struct MemoryContextDecisionProvider: DecisionProvider {
     let providerID = "memory-context-test"
     func decide(_ request: DecisionRequest) async throws -> ProviderDecision {
-        let first = try #require(request.options.first)
+        guard let first = request.options.first else { throw DecisionError.noOptions }
         return ProviderDecision(selectedOptionID: first.id, confidence: 1.0)
     }
 }
@@ -464,12 +465,14 @@ private struct MemoryContextDecisionProvider: DecisionProvider {
             text: "project preference",
             maxItems: 1,
             maxBytes: 100_000,
+            memoryLimit: 2,
             memoryMaxBytes: 100_000
         ),
         as: principal,
         now: Date(timeIntervalSince1970: 3_000)
     )
     #expect(globallyLimited.items.count == 1)
+    #expect(globallyLimited.memoryRetrievalSummary.retrieved == 2)
     #expect(globallyLimited.omittedByBudgetCount == 1)
 }
 
