@@ -134,7 +134,7 @@ private struct MemoryContextDecisionProvider: DecisionProvider {
     #expect(!compiled.memoryRetrievalSummary.failed)
 }
 
-@Test func memoryQueryCannotImplicitlyWidenContextScope() async throws {
+@Test func memoryQueryCannotImplicitlyWidenOrProbeContextScope() async throws {
     let principal = TenantContext(tenantID: UUID(), userID: UUID())
     let ledger = InMemoryMemoryLedger()
     let service = try MemoryService(principal: principal, ledger: ledger)
@@ -159,8 +159,9 @@ private struct MemoryContextDecisionProvider: DecisionProvider {
         as: principal
     )
     #expect(noProjectContextScope.items.isEmpty)
-    #expect(noProjectContextScope.memoryRetrievalSummary.retrieved == 1)
+    #expect(noProjectContextScope.memoryRetrievalSummary.retrieved == 0)
     #expect(noProjectContextScope.memoryRetrievalSummary.acceptedForRequestedScopes == 0)
+    #expect(!noProjectContextScope.memoryRetrievalSummary.failed)
 
     let projectContext = try ContextScope.project("secnd")
     let allowedProject = try await compiler.compile(
