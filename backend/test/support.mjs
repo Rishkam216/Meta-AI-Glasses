@@ -1,6 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 import { readFile, readdir } from 'node:fs/promises';
+import { randomBytes, createHash } from 'node:crypto';
 import { PostgresTransactions } from '../src/database.mjs';
 
 export async function createTestDatabase() {
@@ -18,21 +19,20 @@ export async function createTestDatabase() {
     return { admin: db, runtime: role('agent_runtime'), auth: role('agent_auth'),
       writer: role('agent_writer'), native: false, close: () => db.close() };
   }
-  // Native tests require an explicitly named disposable local database. Never
-  // apply test-role credentials to an arbitrary supplied production endpoint.
   const url = new URL(process.env.TEST_POSTGRES_URL);
   if (!['localhost','127.0.0.1','[::1]'].includes(url.hostname) || url.pathname !== '/agent_isolation_test')
     throw new Error('disposable_local_test_database_required');
   const adminPool = new pg.Pool({ connectionString: url.href });
 
-  // node:test files run sequentially against one native PostgreSQL service. The
-  // bootstrap migration owns roles and default privileges at cluster/database
-  // scope, so it must run once. Later test files reuse that isolated fixture;
-  // each test issues fresh random principals, so persisted rows cannot collide.
   const installed = await adminPool.query("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='agent_owner') AS value");
   if (!installed.rows[0].value) {
     for (const migration of migrations) await adminPool.query(migration);
     await adminPool.query("ALTER ROLE agent_runtime LOGIN PASSWORD 'test-runtime-only'; ALTER ROLE agent_auth LOGIN PASSWORD 'test-auth-only'");
+  } else {
+    // A prior node:test file may have bootstrapped an older migration set in the
+    // same disposable native service. Apply only missing numbered migrations.
+    const authInstalled = await adminPool.query("SELECT to_regclass('agent_private.external_identities') IS NOT NULL AS value");
+    if (!authInstalled.rows[0].value) await adminPool.query(migrations.at(-1));
   }
 
   const pool = (role, password) => {
@@ -49,6 +49,18 @@ export async function createTestDatabase() {
   } };
   return { admin, runtime: new PostgresTransactions(runtimePool), auth: new PostgresTransactions(authPool,'agent_auth'),
     writer, native:true, close: async () => { await runtimePool.end(); await authPool.end(); await adminPool.end(); } };
+}
+
+// Test/admin fixture only. Production agent_auth deliberately cannot call the
+// arbitrary-principal issue_session function after migration 004.
+export async function issueTestSession(db, identity, lifetimeSeconds = 3600) {
+  const token = randomBytes(32).toString('base64url');
+  const digest = createHash('sha256').update(token).digest();
+  const expires = new Date(Date.now() + lifetimeSeconds * 1000);
+  await db.admin.query(
+    'SELECT agent_private.issue_session($1::uuid,$2::uuid,$3::uuid,$4::bytea,$5::timestamptz)',
+    [identity.tenantID, identity.userID, identity.accountID ?? null, digest, expires]);
+  return { token, expiresAt: expires.toISOString() };
 }
 
 export function asSession(database, token, work) {
