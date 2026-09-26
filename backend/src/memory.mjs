@@ -24,10 +24,22 @@ function scope(value) {
   return [value.kind, value.referenceID];
 }
 function limit(value = 50) { requireValid(Number.isInteger(value) && value >= 1 && value <= 100); return value; }
+function canonicalRevision(value) {
+  requireValid(Number.isSafeInteger(value) && value >= 0 && value <= 9007199254740990);
+  return value;
+}
+function canonicalSnapshot(value) {
+  requireValid(value !== null && typeof value === 'object' && !Array.isArray(value));
+  const body = JSON.stringify(value);
+  requireValid(body !== undefined && Buffer.byteLength(body) <= 8388608);
+  return body;
+}
 
 // No tenant/user/account arguments. Identity always comes from a valid server
-// session. This storage API is distinct from Swift MemoryService until a full
-// canonical ledger adapter (lineage, supersession, provider queue) is wired.
+// session. The legacy operations remain available while canonical_load and
+// canonical_commit provide the atomic storage boundary used by Swift
+// MemoryServiceLedger. Canonical lifecycle semantics are validated by the Swift
+// ledger engine and the database independently rejects embedded foreign identity.
 export class MemoryBackend {
   #database;
   constructor(database) { this.#database = database; }
@@ -40,6 +52,15 @@ export class MemoryBackend {
     switch (request.operation) {
       case 'identity':
         shape(input, []); sql = 'SELECT agent_api.identity() AS value'; params = []; break;
+      case 'canonical_load':
+        shape(input, []); sql = 'SELECT agent_api.canonical_memory_load() AS value'; params = []; break;
+      case 'canonical_commit': {
+        shape(input, ['expectedRevision','snapshot']);
+        const expected = canonicalRevision(input.expectedRevision);
+        const snapshot = canonicalSnapshot(input.snapshot);
+        sql = 'SELECT agent_api.canonical_memory_commit($1::bigint,$2::jsonb) AS value';
+        params = [expected, snapshot]; break;
+      }
       case 'remember': {
         shape(input, ['id','scope','content','provenance'], ['scope','content']);
         const [kind, ref] = scope(input.scope);
@@ -77,6 +98,7 @@ export class MemoryBackend {
       });
     } catch (error) {
       if (error.code === '28000') throw new APIError(401, 'unauthenticated');
+      if (error.code === '40001') throw new APIError(409, 'state_conflict');
       if (error.code === '23505') throw new APIError(409, 'memory_conflict');
       if (['22023','22P02','23514','23502'].includes(error.code)) throw new APIError(400, 'invalid_request');
       if (error.code === '42501') throw new APIError(403, 'forbidden');
