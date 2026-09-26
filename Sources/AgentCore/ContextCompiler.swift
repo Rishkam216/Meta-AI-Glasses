@@ -276,6 +276,19 @@ public struct ContextCompiler: Sendable {
             ))
         }
 
+        let compilerMemoryScopes = try allowedMemoryScopes(from: scopes)
+        let effectiveScopes = memoryQuery.scopes.intersection(compilerMemoryScopes)
+        guard !effectiveScopes.isEmpty else {
+            // Scope rejection happens before memory retrieval, so a semantic query
+            // cannot probe whether a disallowed project/workspace contains a hit.
+            return ([], MemoryRetrievalSummary(
+                requested: true,
+                retrieved: 0,
+                acceptedForRequestedScopes: 0,
+                failed: false
+            ))
+        }
+
         guard let memoryRetriever else {
             return ([], MemoryRetrievalSummary(
                 requested: true,
@@ -286,8 +299,14 @@ public struct ContextCompiler: Sendable {
         }
 
         do {
+            let effectiveQuery = try MemoryContextQuery(
+                text: memoryQuery.text,
+                scopes: effectiveScopes,
+                limit: memoryQuery.limit,
+                maxBytes: memoryQuery.maxBytes
+            )
             let retrieved = try await memoryRetriever.retrieve(
-                memoryQuery,
+                effectiveQuery,
                 as: principal,
                 now: now
             )
@@ -300,10 +319,10 @@ public struct ContextCompiler: Sendable {
                 }
                 guard item.provenance.trust == .memory,
                       item.provenance.origin == .memoryService,
-                      item.key == "memory" else {
+                      item.key == "memory",
+                      scopes.contains(item.scope) else {
                     throw MemoryContextError.invalidResponse
                 }
-                guard scopes.contains(item.scope) else { continue }
                 accepted.append(item)
             }
 
@@ -330,6 +349,29 @@ public struct ContextCompiler: Sendable {
                 failed: true
             ))
         }
+    }
+
+    private func allowedMemoryScopes(from contextScopes: Set<ContextScope>) throws -> Set<MemoryScope> {
+        var allowed: Set<MemoryScope> = []
+        for scope in contextScopes {
+            switch scope.kind {
+            case .user:
+                allowed.insert(.user)
+            case .project:
+                guard let referenceID = scope.referenceID else {
+                    throw ContextValidationError.emptyScopeReference
+                }
+                allowed.insert(try .project(referenceID))
+            case .workspace:
+                guard let referenceID = scope.referenceID else {
+                    throw ContextValidationError.emptyScopeReference
+                }
+                allowed.insert(try .workspace(referenceID))
+            case .session, .interface, .device, .task, .application, .connectedService:
+                continue
+            }
+        }
+        return allowed
     }
 
     private func refreshIfNeeded(_ request: ContextCompilationRequest,
