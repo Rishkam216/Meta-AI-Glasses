@@ -1,13 +1,17 @@
 # Realtime AI → Agent Orchestrator → Mac Executor
 
-Status: **IMPLEMENTED AND DETERMINISTICALLY VALIDATED — READY FOR PR**  
-Branch: `core/realtime-orchestrator-mac-control`  
-Started: 2026-09-26  
-Implementation checkpoint: 2026-09-26
+Status: **FIRST TEXT/CONTROL SLICE MERGED; LIVE OPENAI TEXT CANARY PASSED**  
+Original implementation branch: `core/realtime-orchestrator-mac-control`  
+Merged through: PR #17  
+Merged `main`: `8496fd7ef707653c71224ec18bd6ef2483a63cfb`  
+Validated feature head: `dc46ad1179c06eced8b7cab7292377eec60715bd`  
+Live-canary branch: `core/realtime-live-canary`  
+Successful live-canary commit: `f1c12c59a21143b8109ca0a127fd41056c2185ba`  
+Implementation/live checkpoint: 2026-09-26
 
-This document records the first user-visible conversational Mac-control slice. The master architecture remains `docs/FINALIZED_PRODUCT_CONTEXT_MEMORY_PLAN.md`.
+This document records the first user-visible conversational Mac-control slice and its first real OpenAI Realtime text-network validation. The master architecture remains `docs/FINALIZED_PRODUCT_CONTEXT_MEMORY_PLAN.md`.
 
-The milestone is deliberately text/control-first. A live paid OpenAI network canary and voice/audio UX are **not** claimed as validated here.
+The milestone remains deliberately text/control-first. Voice/audio UX, automatic reconnect/resume, live function/tool execution, and production cloud deployment are **not** claimed as complete.
 
 ---
 
@@ -49,7 +53,7 @@ The model never becomes the security authority. Tenant identity, trusted device/
 
 ## 2. Provider-neutral realtime contracts — COMPLETE
 
-AgentCore now contains provider-neutral realtime contracts and does not import OpenAI wire types.
+AgentCore contains provider-neutral realtime contracts and does not import OpenAI wire types.
 
 Implemented portable concepts include:
 
@@ -67,9 +71,9 @@ Authoritative tenant/user/account identity is intentionally absent from model-co
 
 ---
 
-## 3. Realtime coordinator — COMPLETE
+## 3. Realtime coordinator — COMPLETE FOR FIRST SLICE
 
-`RealtimeCoordinator` now:
+`RealtimeCoordinator`:
 
 1. receives trusted `AgentInvocationContext`;
 2. derives the trusted device from explicit application state or the active session device;
@@ -162,7 +166,9 @@ Validated behavior:
 - mismatched duplicate event ID → fails closed;
 - consumed approval is never reused to execute a duplicate action.
 
-The menu-bar app now presents a local `Allow Once` / `Deny` dialog showing the resolved native tool and arguments.
+The menu-bar app presents a local `Allow Once` / `Deny` dialog showing the resolved native tool and arguments.
+
+A live-model function-call/approval canary has **not** yet been run; the approval path above is deterministically/native-tested.
 
 ---
 
@@ -187,7 +193,7 @@ Memory remains context, never action authority.
 
 ---
 
-## 8. OpenAI Realtime adapter — IMPLEMENTED, DETERMINISTICALLY TESTED
+## 8. OpenAI Realtime adapter — LIVE TEXT NETWORK VALIDATED
 
 Provider-specific code is confined to MacRuntime.
 
@@ -209,21 +215,38 @@ Implemented:
 - credential/response size validation;
 - no API key in AgentCore, model context, test fixtures, or audit output.
 
-Fake-WebSocket tests validate the exact translation without network cost.
+Fake-WebSocket tests validate exact translation without network cost.
 
-### Not claimed yet
+### Real paid network canary — PASSED
 
-- no live paid OpenAI Realtime handshake was run for this milestone;
-- automatic reconnect/resume after a broken network transport is not yet a completed production feature;
-- audio input/output is deferred.
+A deliberately bounded real OpenAI Realtime canary passed on 2026-09-26:
 
-A future live canary must be deliberately bounded for cost and use a fresh authorized credential.
+- successful commit: `f1c12c59a21143b8109ca0a127fd41056c2185ba`;
+- GitHub Actions run: `36239995353` (`Realtime live canary` run #3);
+- repository Actions secret gate passed;
+- release `RealtimeLiveCanary` executable built successfully;
+- one client-secret mint + one WebSocket session + one tiny text turn completed successfully;
+- production `OpenAIRealtimeProvider` and `URLSessionOpenAIRealtimeTransport` were exercised;
+- normalized success marker `REALTIME_LIVE_CANARY_OK` was returned;
+- GitHub masked the long-lived API key as `***`;
+- no ephemeral credential appeared in the audited logs;
+- no tool/action execution occurred;
+- no automatic retry occurred.
+
+Details: `docs/REALTIME_LIVE_CANARY.md`.
+
+### Still not claimed
+
+- automatic reconnect/resume after a broken network transport;
+- live provider function/tool calling through local approval;
+- audio input/output;
+- production deployed Mac → backend → OpenAI credential path.
 
 ---
 
-## 9. Production Realtime credential boundary — IMPLEMENTED
+## 9. Production Realtime credential boundary — IMPLEMENTED LOCALLY, DEPLOYMENT OPEN
 
-The production design no longer requires the Mac app to accept or persist a long-lived OpenAI API key.
+The production design does not require the Mac app to accept or persist a long-lived OpenAI API key.
 
 Implemented path:
 
@@ -259,15 +282,15 @@ Mac behavior:
 - no standard OpenAI API key is accepted by the current app UI;
 - HTTP credential endpoint has HTTPS/loopback rules, no redirects, no cookies/cache, bounded timeouts and response validation.
 
-The menu-bar text UI now checks for a valid Keychain agent session before enabling Send.
+The menu-bar text UI checks for a valid Keychain agent session before enabling Send.
 
-Production Supabase configuration/login UX remains a separate authentication deployment task.
+The successful GitHub canary proved the real OpenAI client-secret/WebSocket text boundary, but it did **not** prove the shipping Mac app against a publicly deployed backend. Production Supabase configuration/login UX and backend deployment remain separate tasks.
 
 ---
 
 ## 10. User-visible Mac text interface — IMPLEMENTED
 
-The menu-bar app now includes `Open Agent…` with:
+The menu-bar app includes `Open Agent…` with:
 
 - a text command field;
 - assistant response display;
@@ -278,7 +301,7 @@ The menu-bar app now includes `Open Agent…` with:
 - current tool-call count/status;
 - sanitized user-facing errors.
 
-Examples the first slice is designed to handle once backend/provider configuration is live:
+Examples the first slice is designed to handle once production backend/auth configuration is live:
 
 - `What app is active?`
 - `Open TextEdit`
@@ -319,18 +342,16 @@ Backend coverage includes:
 - embedded PostgreSQL;
 - native PostgreSQL.
 
-### Latest pre-documentation exact-head validation
+Live provider coverage now includes:
 
-Code head `06e237fd97450b53c70718c6d7cd2f9e28c2ba79` passed:
+- [x] standard-key → Realtime client-secret mint on the real network;
+- [x] short-lived credential → production Swift WebSocket adapter;
+- [x] real `session.created` gated text session;
+- [x] one bounded text response completed successfully;
+- [x] clean result/close path;
+- [x] job-log secret audit.
 
-- [x] Backend isolation — embedded PostgreSQL;
-- [x] Backend isolation — native PostgreSQL;
-- [x] Portable AgentCore;
-- [x] offline live-canary harness;
-- [x] macOS AgentCore/MacRuntime compile and tests;
-- [x] native macOS `.app` bundle build/verification.
-
-The documentation commit must receive the same exact-head gates before PR merge.
+The live canary intentionally did not expose any Mac tool to the model.
 
 ---
 
@@ -347,20 +368,23 @@ The documentation commit must receive the same exact-head gates before PR merge.
 - [x] duplicate/replayed action intent does not execute twice;
 - [x] typed tool result returns to realtime session;
 - [x] cancellation semantics are tested at the session/coordinator boundary;
-- [x] portable + native + backend CI is green on the latest code head;
-- [x] this implementation document records exact completed/deferred behavior.
-- [ ] master plan final checkpoint update — done in the companion documentation commit before PR.
+- [x] portable + native + backend CI was green on the merged feature head;
+- [x] user-visible Mac text interface exists;
+- [x] bounded paid OpenAI Realtime text-network canary passed;
+- [x] provider credentials remained out of logs/model context in that canary;
+- [x] implementation documents distinguish completed vs deferred behavior.
 
 ---
 
-## 13. Explicitly deferred / not proven by this milestone
+## 13. Explicitly deferred / not proven yet
 
-- live paid OpenAI Realtime network canary;
 - automatic transport reconnect/resume hardening;
+- live provider function/tool execution through the local approval boundary;
 - voice/audio-device management;
 - polished login/signup UI;
 - production Supabase project configuration;
 - production backend/cloud deployment;
+- end-to-end shipping Mac Keychain session → deployed backend → OpenAI credential path;
 - additional Mac tools (`ui.get_windows`, `ui.click`, `ui.type`, `file.read`, `process.list`, `shell.run`, screen capture);
 - mobile app;
 - Windows executor;
@@ -369,4 +393,4 @@ The documentation commit must receive the same exact-head gates before PR merge.
 - broad browser automation;
 - live Supermemory mutation enablement.
 
-These are intentionally separate milestones. They must not be inferred from the completed deterministic text-control slice.
+These are intentionally separate milestones. They must not be inferred from the completed text-control slice or the successful bounded text-network canary.
