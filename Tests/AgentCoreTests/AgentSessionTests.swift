@@ -12,7 +12,7 @@ private let validAgentToken = String(repeating: "A", count: 43)
     let future = Date(timeIntervalSince1970: 4_000_000_000)
     let credential = try AgentSessionCredential(token: validAgentToken, expiresAt: future,
                                                 identity: sessionPrincipal)
-    #expect(credential.bearerToken(at: Date(timeIntervalSince1970: 1_000)) == validAgentToken)
+    #expect(try credential.bearerToken(at: Date(timeIntervalSince1970: 1_000)) == validAgentToken)
     #expect(!credential.isExpired(at: Date(timeIntervalSince1970: 1_000)))
     #expect(credential.isExpired(at: future))
     #expect(throws: AgentSessionCredentialError.expired) {
