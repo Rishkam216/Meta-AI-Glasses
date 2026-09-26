@@ -1,0 +1,37 @@
+name: Realtime live canary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: realtime-live-canary
+  cancel-in-progress: false
+
+jobs:
+  live-canary:
+    runs-on: macos-15
+    timeout-minutes: 3
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Require OpenAI API key secret
+        shell: bash
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::Repository Actions secret OPENAI_API_KEY is not configured."
+            exit 1
+          fi
+
+      - name: Show Swift toolchain
+        run: swift --version
+
+      - name: Build bounded live canary
+        run: swift build -c release --product RealtimeLiveCanary
+
+      - name: Run one bounded Realtime network turn
+        run: .build/release/RealtimeLiveCanary
