@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createTestDatabase, issueTestSession } from './support.mjs';
 import { MemoryBackend } from '../src/memory.mjs';
+import { SessionIssuer } from '../src/sessions.mjs';
 import { RealtimeCredentialBroker } from '../src/realtime.mjs';
 import { createMemoryHandler } from '../src/http.mjs';
 
@@ -11,7 +12,6 @@ let db, memory;
 before(async()=>{ db=await createTestDatabase(); memory=new MemoryBackend(db.runtime); });
 after(async()=>{ if(db) await db.close(); });
 const identity=()=>({tenantID:randomUUID(),userID:randomUUID(),accountID:null});
-const code=expected=>error=>error.code===expected;
 const fakeCredential='ek_test_ephemeral_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
 
 function broker(fetchImpl) {
@@ -58,11 +58,13 @@ test('safety identifier is stable per principal and separated across principals'
   assert.equal(identifiers.some(value=>value.includes(a.userID)||value.includes(b.userID)),false);
 });
 
-test('unauthenticated or expired session never reaches OpenAI',async()=>{
+test('unauthenticated or revoked session never reaches OpenAI',async()=>{
   let calls=0; const service=broker(async()=>{ calls++; return new Response('{}',{status:200}); });
   await assert.rejects(service.mint('Bearer invalid'),e=>e.status===401&&e.code==='unauthenticated');
-  const expired=await issueTestSession(db,identity(),-1);
-  await assert.rejects(service.mint('Bearer '+expired.token),e=>e.status===401&&e.code==='unauthenticated');
+  const revoked=await issueTestSession(db,identity());
+  const issuer=new SessionIssuer(db.auth);
+  await issuer.revoke(revoked.token);
+  await assert.rejects(service.mint('Bearer '+revoked.token),e=>e.status===401&&e.code==='unauthenticated');
   assert.equal(calls,0);
 });
 
