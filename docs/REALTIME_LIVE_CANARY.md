@@ -1,6 +1,6 @@
 # OpenAI Realtime Live Canary
 
-Status: **Planned / implementation in progress**
+Status: **Invocation mechanism ready; live result pending**
 
 Created: 2026-09-26
 
@@ -38,7 +38,7 @@ The long-lived OpenAI API key must never be embedded in source, committed to git
 
 ## Bounded execution rules
 
-The live canary must remain manual-only and must not run on normal push/PR CI.
+The live canary must never run on ordinary push/PR CI. It may run only from an explicit `workflow_dispatch` invocation or from the dedicated canary branch when the triggering commit message contains the exact opt-in marker `[run-realtime-canary]`.
 
 Required bounds:
 
@@ -88,7 +88,7 @@ Those require separate staged validations.
 
 ## Cost discipline
 
-The prompt is intentionally tiny and asks for a deterministic short marker response. The workflow is manual-only and performs no retries. A successful invocation should consume only a minimal Realtime text turn plus one client-secret mint request.
+The prompt is intentionally tiny and asks for a deterministic short marker response. A canary invocation performs no retries. A successful invocation should consume only a minimal Realtime text turn plus one client-secret mint request.
 
 ## Secret handling
 
