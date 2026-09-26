@@ -15,19 +15,34 @@ private actor RealtimeApprovalCounter {
     func increment() { value += 1 }
 }
 
+private struct RealtimeProbeOpenInput: Codable, Sendable {
+    let bundleIdentifier: String
+
+    private enum CodingKeys: String, CodingKey {
+        case bundleIdentifier = "bundle_identifier"
+    }
+}
+
 private struct RealtimeWriteProbe: Tool {
     let counter: RealtimeApprovalCounter
 
     let descriptor = ToolDescriptor(
-        name: "test.write_action",
-        summary: "Write action used to prove realtime approval binding.",
+        name: "app.open",
+        summary: "Probe native app-open action.",
         risk: .reversibleWrite,
-        inputSchema: EmptyInput.schema
+        inputSchema: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "bundle_identifier": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("bundle_identifier")]),
+            "additionalProperties": .bool(false)
+        ])
     )
 
-    func execute(_ input: EmptyInput) async throws -> String {
+    func execute(_ input: RealtimeProbeOpenInput) async throws -> String {
         await counter.increment()
-        return "executed"
+        return input.bundleIdentifier
     }
 }
 
@@ -61,7 +76,10 @@ private actor RealtimeApprovalSession: RealtimeModelSession {
     func close() {}
 }
 
-private func realtimeApprovalHarness(approvals: ApprovalStore) async throws -> (
+private func realtimeApprovalHarness(
+    approvals: ApprovalStore,
+    approvalProvider: (any RealtimeApprovalProviding)? = nil
+) async throws -> (
     coordinator: RealtimeCoordinator,
     invocation: AgentInvocationContext,
     counter: RealtimeApprovalCounter
@@ -88,15 +106,68 @@ private func realtimeApprovalHarness(approvals: ApprovalStore) async throws -> (
         session: AgentSession(activeDeviceID: identity.id),
         interfaceID: UUID()
     )
-    return (RealtimeCoordinator(orchestrator: orchestrator), invocation, counter)
+    return (
+        RealtimeCoordinator(
+            orchestrator: orchestrator,
+            approvalProvider: approvalProvider
+        ),
+        invocation,
+        counter
+    )
+}
+
+private func openIntent(turnID: UUID, eventID: UUID = UUID()) throws -> RealtimeToolIntent {
+    try RealtimeToolIntent(
+        eventID: eventID,
+        turnID: turnID,
+        tool: "computer.open_app",
+        arguments: .object([
+            "application_id": .string("com.apple.TextEdit")
+        ])
+    )
 }
 
 @Test func realtimeWriteWithoutTrustedApprovalNeverReachesExecutor() async throws {
     let approvals = ApprovalStore()
     let harness = try await realtimeApprovalHarness(approvals: approvals)
-    let turn = try RealtimeTurnRequest(text: "Do the write action")
-    let intent = try RealtimeToolIntent(turnID: turn.id, tool: "test.write_action")
+    let turn = try RealtimeTurnRequest(text: "Open TextEdit")
     let session = RealtimeApprovalSession(events: [
+        .toolIntent(try openIntent(turnID: turn.id)),
+        .turnCompleted(RealtimeTurnCompleted(turnID: turn.id))
+    ])
+
+    let result = try await harness.coordinator.runTurn(
+        turn,
+        in: harness.invocation,
+        using: session
+    )
+
+    #expect(result.toolResults.count == 1)
+    #expect(result.toolResults[0].tool == "computer.open_app")
+    #expect(result.toolResults[0].error?.code == .approvalRequired)
+    #expect(await harness.counter.value == 0)
+}
+
+@Test func trustedLocalApprovalExecutesExactRealtimeActionOnce() async throws {
+    let approvals = ApprovalStore()
+    let broker = LocalApprovalBroker(approvals: approvals) { request in
+        #expect(request.descriptor.name == "app.open")
+        #expect(request.descriptor.risk == .reversibleWrite)
+        #expect(request.arguments == .object([
+            "bundle_identifier": .string("com.apple.TextEdit")
+        ]))
+        return true
+    }
+    let harness = try await realtimeApprovalHarness(
+        approvals: approvals,
+        approvalProvider: broker
+    )
+
+    let turn = try RealtimeTurnRequest(text: "Open TextEdit")
+    let eventID = UUID()
+    let intent = try openIntent(turnID: turn.id, eventID: eventID)
+    let session = RealtimeApprovalSession(events: [
+        .toolIntent(intent),
         .toolIntent(intent),
         .turnCompleted(RealtimeTurnCompleted(turnID: turn.id))
     ])
@@ -108,102 +179,31 @@ private func realtimeApprovalHarness(approvals: ApprovalStore) async throws -> (
     )
 
     #expect(result.toolResults.count == 1)
-    #expect(result.toolResults[0].error?.code == .approvalRequired)
-    #expect(await harness.counter.value == 0)
-}
-
-@Test func trustedLocalApprovalExecutesExactRealtimeActionOnce() async throws {
-    let approvals = ApprovalStore()
-    let base = try await realtimeApprovalHarness(approvals: approvals)
-    let broker = LocalApprovalBroker(approvals: approvals) { request in
-        #expect(request.descriptor.name == "test.write_action")
-        #expect(request.descriptor.risk == .reversibleWrite)
-        return true
-    }
-
-    // Reuse the exact same orchestrator/device harness by constructing an
-    // equivalent coordinator is not possible from the returned base, so build
-    // the approved harness directly here.
-    let counter = RealtimeApprovalCounter()
-    let runtime = ToolRuntime(
-        audit: RealtimeApprovalAudit(),
-        permissions: RealtimeApprovalPermissions(),
-        approvals: approvals
-    )
-    try await runtime.register(RealtimeWriteProbe(counter: counter))
-    let identity = DeviceIdentity(displayName: "Approved Mac", platform: "macOS")
-    let router = DeviceRouter()
-    try await router.register(RuntimeDeviceExecutor(identity: identity, runtime: runtime))
-    let orchestrator = AgentOrchestrator(
-        devices: router,
-        decisions: DecisionEngine(boundedProvider: RealtimeApprovalDecisionProvider()),
-        contextCompiler: ContextCompiler(store: InMemoryContextService())
-    )
-    let coordinator = RealtimeCoordinator(
-        orchestrator: orchestrator,
-        approvalProvider: broker
-    )
-    let invocation = AgentInvocationContext(
-        principal: base.invocation.principal,
-        session: AgentSession(activeDeviceID: identity.id),
-        interfaceID: UUID()
-    )
-
-    let turn = try RealtimeTurnRequest(text: "Do the write action")
-    let eventID = UUID()
-    let intent = try RealtimeToolIntent(
-        eventID: eventID,
-        turnID: turn.id,
-        tool: "test.write_action"
-    )
-    let session = RealtimeApprovalSession(events: [
-        .toolIntent(intent),
-        .toolIntent(intent),
-        .turnCompleted(RealtimeTurnCompleted(turnID: turn.id))
-    ])
-
-    let result = try await coordinator.runTurn(turn, in: invocation, using: session)
-
-    #expect(result.toolResults.count == 1)
+    #expect(result.toolResults[0].tool == "computer.open_app")
     #expect(result.toolResults[0].status == "success")
     #expect(result.toolResults[0].requestID == eventID)
-    #expect(await counter.value == 1)
+    #expect(await harness.counter.value == 1)
 }
 
 @Test func declinedRealtimeApprovalDoesNotReachExecutor() async throws {
     let approvals = ApprovalStore()
-    let counter = RealtimeApprovalCounter()
-    let runtime = ToolRuntime(
-        audit: RealtimeApprovalAudit(),
-        permissions: RealtimeApprovalPermissions(),
-        approvals: approvals
-    )
-    try await runtime.register(RealtimeWriteProbe(counter: counter))
-    let identity = DeviceIdentity(displayName: "Mac", platform: "macOS")
-    let router = DeviceRouter()
-    try await router.register(RuntimeDeviceExecutor(identity: identity, runtime: runtime))
-    let orchestrator = AgentOrchestrator(
-        devices: router,
-        decisions: DecisionEngine(boundedProvider: RealtimeApprovalDecisionProvider()),
-        contextCompiler: ContextCompiler(store: InMemoryContextService())
-    )
     let broker = LocalApprovalBroker(approvals: approvals) { _ in false }
-    let coordinator = RealtimeCoordinator(
-        orchestrator: orchestrator,
+    let harness = try await realtimeApprovalHarness(
+        approvals: approvals,
         approvalProvider: broker
     )
-    let invocation = AgentInvocationContext(
-        principal: TenantContext(tenantID: UUID(), userID: UUID()),
-        session: AgentSession(activeDeviceID: identity.id)
-    )
-    let turn = try RealtimeTurnRequest(text: "Do it")
+    let turn = try RealtimeTurnRequest(text: "Open TextEdit")
     let session = RealtimeApprovalSession(events: [
-        .toolIntent(try RealtimeToolIntent(turnID: turn.id, tool: "test.write_action")),
+        .toolIntent(try openIntent(turnID: turn.id)),
         .turnCompleted(RealtimeTurnCompleted(turnID: turn.id))
     ])
 
-    let result = try await coordinator.runTurn(turn, in: invocation, using: session)
+    let result = try await harness.coordinator.runTurn(
+        turn,
+        in: harness.invocation,
+        using: session
+    )
 
     #expect(result.toolResults[0].error?.code == .approvalRequired)
-    #expect(await counter.value == 0)
+    #expect(await harness.counter.value == 0)
 }
