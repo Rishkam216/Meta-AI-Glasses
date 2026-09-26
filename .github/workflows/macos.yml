@@ -15,6 +15,42 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Show toolchain
         run: swift --version
+      - name: Diagnose macOS temp filesystem
+        run: |
+          set -euo pipefail
+          cat > /tmp/meta-agent-fs-probe.swift <<'SWIFT'
+          import Foundation
+          #if canImport(Darwin)
+          import Darwin
+          #endif
+
+          let fm = FileManager.default
+          let base = fm.temporaryDirectory.resolvingSymlinksInPath()
+          let dir = base.appendingPathComponent("meta-agent-fs-probe-\(UUID().uuidString)", isDirectory: true)
+          try fm.createDirectory(at: dir, withIntermediateDirectories: false,
+                                 attributes: [.posixPermissions: 0o700])
+          defer { try? fm.removeItem(at: dir) }
+          var info = stat()
+          let statResult = lstat(dir.path, &info)
+          print("base=\(base.path)")
+          print("created=\(dir.path) stat=\(statResult) uid=\(info.st_uid) euid=\(geteuid()) mode=\(String(info.st_mode & 0o777, radix: 8))")
+
+          var fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+          print("rootFD=\(fd) errno=\(errno)")
+          for part in dir.pathComponents where part != "/" {
+              errno = 0
+              let next = openat(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+              print("component=\(part) next=\(next) errno=\(errno)")
+              if next < 0 { exit(2) }
+              close(fd)
+              fd = next
+          }
+          var finalInfo = stat()
+          let finalResult = fstat(fd, &finalInfo)
+          print("final fstat=\(finalResult) uid=\(finalInfo.st_uid) mode=\(String(finalInfo.st_mode & 0o777, radix: 8))")
+          close(fd)
+          SWIFT
+          swift /tmp/meta-agent-fs-probe.swift
       - name: Compile and test core and macOS adapters
         run: swift test
       - name: Build and verify native app bundle
