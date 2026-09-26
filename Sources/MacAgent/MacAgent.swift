@@ -23,7 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var resultOutput: NSTextView?
 
     private var commandWindow: NSWindow?
-    private var credentialField: NSSecureTextField?
     private var commandField: NSTextField?
     private var responseView: NSTextView?
     private var realtimeStatusLabel: NSTextField?
@@ -132,6 +131,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         commandWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         commandField?.becomeFirstResponder()
+
+        guard let controller else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            let signedIn = await controller.hasAgentSession()
+            self.realtimeStatusLabel?.stringValue = signedIn
+                ? "Authenticated agent session found. Read actions run directly; write actions require local approval."
+                : "Sign in first: no valid agent session is stored in Keychain."
+            self.sendButton?.isEnabled = signedIn && self.realtimeTask == nil
+        }
     }
 
     @objc private func sendRealtimeTurn() {
@@ -140,7 +149,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               let commandField else { return }
 
         let text = commandField.stringValue
-        let credential = credentialField?.stringValue ?? ""
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             realtimeStatusLabel?.stringValue = "Enter a command first."
             return
@@ -148,7 +156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         sendButton?.isEnabled = false
         commandField.isEnabled = false
-        credentialField?.isEnabled = false
         realtimeStatusLabel?.stringValue = "Running…"
         statusItem?.button?.title = "Agent · running"
 
@@ -158,16 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.realtimeTask = nil
                 self.sendButton?.isEnabled = true
                 self.commandField?.isEnabled = true
-                self.credentialField?.isEnabled = true
                 self.statusItem?.button?.title = "Agent"
             }
 
             do {
-                if !credential.isEmpty {
-                    try await controller.setCredential(credential)
-                    self.credentialField?.stringValue = ""
-                }
-
                 let result = try await controller.run(text: text)
                 let assistant = result.assistantText.joined()
                 self.responseView?.string = assistant.isEmpty
@@ -221,34 +222,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard commandWindow == nil else { return }
 
         let panel = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 540),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 500),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Personal Agent · Realtime Text"
         panel.isReleasedWhenClosed = false
-        panel.minSize = NSSize(width: 620, height: 460)
+        panel.minSize = NSSize(width: 620, height: 420)
 
         guard let content = panel.contentView else { return }
 
-        let keyLabel = NSTextField(labelWithString: "OpenAI API key · kept in memory only for this app run")
-        keyLabel.frame = NSRect(x: 20, y: 492, width: 680, height: 20)
-        keyLabel.autoresizingMask = [.width, .minYMargin]
-        content.addSubview(keyLabel)
-
-        let keyField = NSSecureTextField(frame: NSRect(x: 20, y: 458, width: 680, height: 28))
-        keyField.placeholderString = "Paste once; leave blank on later turns"
-        keyField.autoresizingMask = [.width, .minYMargin]
-        credentialField = keyField
-        content.addSubview(keyField)
+        let authLabel = NSTextField(labelWithString: "Authentication: opaque agent session from Keychain · Realtime credential is minted by the backend")
+        authLabel.frame = NSRect(x: 20, y: 452, width: 680, height: 20)
+        authLabel.textColor = .secondaryLabelColor
+        authLabel.autoresizingMask = [.width, .minYMargin]
+        content.addSubview(authLabel)
 
         let commandLabel = NSTextField(labelWithString: "Command")
-        commandLabel.frame = NSRect(x: 20, y: 422, width: 680, height: 20)
+        commandLabel.frame = NSRect(x: 20, y: 414, width: 680, height: 20)
         commandLabel.autoresizingMask = [.width, .minYMargin]
         content.addSubview(commandLabel)
 
-        let input = NSTextField(frame: NSRect(x: 20, y: 386, width: 590, height: 30))
+        let input = NSTextField(frame: NSRect(x: 20, y: 378, width: 590, height: 30))
         input.placeholderString = "Example: What app is active? or Open TextEdit"
         input.autoresizingMask = [.width, .minYMargin]
         input.target = self
@@ -256,23 +252,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         commandField = input
         content.addSubview(input)
 
-        let send = NSButton(frame: NSRect(x: 620, y: 386, width: 80, height: 30))
+        let send = NSButton(frame: NSRect(x: 620, y: 378, width: 80, height: 30))
         send.title = "Send"
         send.bezelStyle = .rounded
         send.target = self
         send.action = #selector(sendRealtimeTurn)
         send.autoresizingMask = [.minXMargin, .minYMargin]
+        send.isEnabled = false
         sendButton = send
         content.addSubview(send)
 
-        let status = NSTextField(labelWithString: "Ready. Read actions run directly; write actions require local approval.")
-        status.frame = NSRect(x: 20, y: 354, width: 680, height: 22)
+        let status = NSTextField(labelWithString: "Checking agent session…")
+        status.frame = NSRect(x: 20, y: 346, width: 680, height: 22)
         status.textColor = .secondaryLabelColor
         status.autoresizingMask = [.width, .minYMargin]
         realtimeStatusLabel = status
         content.addSubview(status)
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 20, width: 680, height: 324))
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 20, width: 680, height: 316))
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
@@ -339,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let provider = error as? OpenAIRealtimeError {
             switch provider {
             case .invalidCredential, .credentialUnavailable:
-                return "The realtime credential is unavailable or invalid."
+                return "The short-lived realtime credential is unavailable or invalid."
             case .handshakeTimeout:
                 return "The realtime connection timed out during setup."
             case .handshakeFailed:
