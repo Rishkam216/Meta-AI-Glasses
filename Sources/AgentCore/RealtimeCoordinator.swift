@@ -5,18 +5,21 @@ import Foundation
 /// never carry authoritative tenant identity, session identity or approval IDs.
 public struct RealtimeCoordinator: Sendable {
     private struct ProcessedToolEvent: Sendable {
-        let tool: String
+        let capability: String
         let arguments: JSONValue
         let result: RealtimeToolResult
     }
 
     private let orchestrator: AgentOrchestrator
     private let approvalProvider: (any RealtimeApprovalProviding)?
+    private let capabilities: any AgentCapabilityResolving
 
     public init(orchestrator: AgentOrchestrator,
-                approvalProvider: (any RealtimeApprovalProviding)? = nil) {
+                approvalProvider: (any RealtimeApprovalProviding)? = nil,
+                capabilities: any AgentCapabilityResolving = DefaultAgentCapabilityRegistry()) {
         self.orchestrator = orchestrator
         self.approvalProvider = approvalProvider
+        self.capabilities = capabilities
     }
 
     public func runTurn(_ request: RealtimeTurnRequest,
@@ -50,9 +53,22 @@ public struct RealtimeCoordinator: Sendable {
             in: invocation
         )
 
+        let availableExecutorTools = try await orchestrator.availableExecutorTools(
+            in: invocation,
+            explicitDeviceID: request.explicitDeviceID
+        )
+        let capabilityCatalog = capabilities.catalog().filter { capability in
+            guard let executorTool = try? capabilities.executorTool(for: capability.name) else {
+                return false
+            }
+            return availableExecutorTools.contains(executorTool)
+        }
+        let allowedCapabilities = Set(capabilityCatalog.map(\.name))
+
         try await session.send(.turnContext(RealtimeTurnContext(
             turnID: request.id,
-            context: compiled
+            context: compiled,
+            capabilities: capabilityCatalog
         )))
         try await session.send(.userText(try RealtimeUserText(
             turnID: request.id,
@@ -81,7 +97,7 @@ public struct RealtimeCoordinator: Sendable {
                 }
 
                 if let previous = processedTools[toolIntent.eventID] {
-                    guard previous.tool == toolIntent.tool,
+                    guard previous.capability == toolIntent.tool,
                           previous.arguments == toolIntent.arguments else {
                         throw RealtimeProtocolError.duplicateEventMismatch
                     }
@@ -99,15 +115,17 @@ public struct RealtimeCoordinator: Sendable {
                     toolIntent,
                     turnID: request.id,
                     trustedDeviceID: request.explicitDeviceID,
-                    invocation: invocation
+                    invocation: invocation,
+                    allowedCapabilities: allowedCapabilities
                 )
                 let providerResult = RealtimeToolResult(
                     sourceEventID: toolIntent.eventID,
                     turnID: request.id,
-                    result: result
+                    result: result,
+                    reportedTool: toolIntent.tool
                 )
                 processedTools[toolIntent.eventID] = ProcessedToolEvent(
-                    tool: toolIntent.tool,
+                    capability: toolIntent.tool,
                     arguments: toolIntent.arguments,
                     result: providerResult
                 )
@@ -147,14 +165,40 @@ public struct RealtimeCoordinator: Sendable {
     private func executeToolIntent(_ intent: RealtimeToolIntent,
                                    turnID: UUID,
                                    trustedDeviceID: UUID?,
-                                   invocation: AgentInvocationContext) async throws -> ToolResult {
+                                   invocation: AgentInvocationContext,
+                                   allowedCapabilities: Set<String>) async throws -> ToolResult {
+        guard allowedCapabilities.contains(intent.tool) else {
+            return providerCapabilityFailure(
+                intent,
+                code: .unknownTool,
+                message: "The requested capability is not available for this turn."
+            )
+        }
+
+        let resolved: ResolvedAgentCapability
         do {
-            // Device identity comes from trusted turn/session state. The provider
-            // supplies only tool + JSON arguments and cannot carry approval IDs.
+            resolved = try capabilities.resolve(name: intent.tool, arguments: intent.arguments)
+        } catch AgentCapabilityResolutionError.invalidArguments {
+            return providerCapabilityFailure(
+                intent,
+                code: .invalidArguments,
+                message: "The capability arguments are invalid."
+            )
+        } catch {
+            return providerCapabilityFailure(
+                intent,
+                code: .unknownTool,
+                message: "The requested capability is not available for this turn."
+            )
+        }
+
+        do {
+            // Device identity comes from trusted turn/session state. Semantic
+            // capability resolution happens locally and yields the native tool.
             let prepared = try await orchestrator.prepare(
                 ToolIntent(
-                    tool: intent.tool,
-                    arguments: intent.arguments,
+                    tool: resolved.executorTool,
+                    arguments: resolved.arguments,
                     explicitDeviceID: trustedDeviceID,
                     approvalID: nil,
                     decisionState: .object([:])
@@ -191,21 +235,25 @@ public struct RealtimeCoordinator: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            let fallbackRequest = ToolRequest(
-                id: intent.eventID,
-                tool: intent.tool,
-                arguments: intent.arguments,
-                context: nil,
-                approvalID: nil
-            )
-            return ToolResult(
-                request: fallbackRequest,
-                error: ToolFailure(
-                    code: .unavailable,
-                    message: "The requested capability is not available for this turn."
-                )
+            return providerCapabilityFailure(
+                intent,
+                code: .unavailable,
+                message: "The requested capability is not available for this turn."
             )
         }
+    }
+
+    private func providerCapabilityFailure(_ intent: RealtimeToolIntent,
+                                           code: ErrorCode,
+                                           message: String) -> ToolResult {
+        ToolResult(
+            request: ToolRequest(
+                id: intent.eventID,
+                tool: intent.tool,
+                arguments: intent.arguments
+            ),
+            error: ToolFailure(code: code, message: message)
+        )
     }
 
     private func approvalRequiredResult(for prepared: PreparedToolExecution) -> ToolResult {
