@@ -20,6 +20,7 @@ public enum RealtimeLimits {
     public static let maxTextBytes = 64 * 1_024
     public static let maxToolArgumentBytes = 256 * 1_024
     public static let maxToolCallsPerTurn = 8
+    public static let maxCapabilities = 32
 }
 
 /// Trusted application-origin turn request. Identity is intentionally absent:
@@ -46,14 +47,19 @@ public struct RealtimeTurnRequest: Sendable, Equatable {
     }
 }
 
-/// Provider-facing context deliberately contains no tenant/user/account identity.
+/// Provider-facing context deliberately contains no tenant/user/account identity
+/// and advertises semantic capabilities rather than native executor tool names.
 public struct RealtimeTurnContext: Codable, Sendable, Equatable {
     public let turnID: UUID
     public let context: CompiledContext
+    public let capabilities: [AgentCapabilityDescriptor]
 
-    public init(turnID: UUID, context: CompiledContext) {
+    public init(turnID: UUID,
+                context: CompiledContext,
+                capabilities: [AgentCapabilityDescriptor] = []) {
         self.turnID = turnID
         self.context = context
+        self.capabilities = Array(capabilities.prefix(RealtimeLimits.maxCapabilities))
     }
 }
 
@@ -72,8 +78,8 @@ public struct RealtimeUserText: Codable, Sendable, Equatable {
     }
 }
 
-/// Model/provider-generated tool intent. It cannot carry tenant identity,
-/// approval IDs, session IDs, or authoritative device identity.
+/// Model/provider-generated semantic capability intent. It cannot carry tenant
+/// identity, approval IDs, session IDs, or authoritative device identity.
 public struct RealtimeToolIntent: Codable, Sendable, Equatable {
     public let eventID: UUID
     public let turnID: UUID
@@ -118,16 +124,20 @@ public struct RealtimeToolResult: Codable, Sendable, Equatable {
     public let sourceEventID: UUID
     public let turnID: UUID
     public let requestID: UUID
+    /// Semantic capability name exposed to the provider, not the native tool name.
     public let tool: String
     public let status: String
     public let data: JSONValue?
     public let error: ToolFailure?
 
-    public init(sourceEventID: UUID, turnID: UUID, result: ToolResult) {
+    public init(sourceEventID: UUID,
+                turnID: UUID,
+                result: ToolResult,
+                reportedTool: String? = nil) {
         self.sourceEventID = sourceEventID
         self.turnID = turnID
         self.requestID = result.requestID
-        self.tool = result.tool
+        self.tool = reportedTool ?? result.tool
         self.status = result.status.rawValue
         self.data = result.data
         self.error = result.error
