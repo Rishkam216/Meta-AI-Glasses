@@ -19,22 +19,17 @@ The product is a personal agent platform. The agent is the product; models, inte
 
 Latest merged milestone:
 
-- PR #16: **Integrate canonical memory into context compilation**.
-- Merged `main` commit: `9474e362eab56cd77135eef540f8e1b537d41d3a`.
-- Validated feature head: `e93f756daa4d5d71556849718e34e0b7748937af`.
+- PR #17: **Realtime orchestrator and native Mac control**.
+- Merged `main` commit: `8496fd7ef707653c71224ec18bd6ef2483a63cfb`.
+- Validated feature head: `dc46ad1179c06eced8b7cab7292377eec60715bd`.
 
 Immediately preceding merged milestones:
 
+- PR #16: canonical Memory → Context Compiler integration.
 - PR #15: provider-neutral Supabase authentication foundation.
 - PR #14: PostgreSQL canonical Memory Service bridge.
 
-## Active pre-merge milestone
-
-Branch:
-
-`core/realtime-orchestrator-mac-control`
-
-Implemented on this branch:
+Merged PR #17 provides:
 
 - provider-neutral realtime session/event contracts in AgentCore;
 - semantic capability layer hiding native executor names from the model;
@@ -49,11 +44,7 @@ Implemented on this branch:
 - Keychain-authenticated Mac Realtime credential client;
 - menu-bar text-agent UI.
 
-Latest fully validated **code** head before the documentation-only commits:
-
-`06e237fd97450b53c70718c6d7cd2f9e28c2ba79`
-
-That exact code head passed:
+The merged PR #17 head passed:
 
 - [x] Backend isolation — embedded PostgreSQL.
 - [x] Backend isolation — native PostgreSQL.
@@ -62,18 +53,46 @@ That exact code head passed:
 - [x] macOS AgentCore/MacRuntime compile and tests.
 - [x] Native macOS `.app` bundle build and verification.
 
-The final documentation head must receive the same exact-head gates before PR merge.
+## Active pre-merge validation milestone — LIVE REALTIME CANARY PASSED
 
-Not claimed by this checkpoint:
+Branch:
 
-- live paid OpenAI Realtime network canary;
+`core/realtime-live-canary`
+
+Successful paid-network canary commit:
+
+`f1c12c59a21143b8109ca0a127fd41056c2185ba`
+
+GitHub Actions run:
+
+`36239995353` — `Realtime live canary` run #3
+
+Validated live behavior:
+
+- [x] GitHub Actions `OPENAI_API_KEY` secret gate passed.
+- [x] Standard server-side OpenAI key successfully minted one short-lived Realtime credential.
+- [x] Production Swift `OpenAIRealtimeProvider` used the real native WebSocket transport.
+- [x] Realtime `session.created` handshake path completed.
+- [x] Exactly one bounded text-only turn completed on the real provider network.
+- [x] Normalized result contained `REALTIME_LIVE_CANARY_OK`.
+- [x] No Mac tool/action was exposed or executed by this canary.
+- [x] No automatic retry occurred.
+- [x] Long-lived API key was masked as `***` in the audited job logs.
+- [x] No short-lived credential appeared in the audited job logs.
+
+The first guarded attempt had stopped before any OpenAI request because the secret was absent; after the repository secret was configured, the single bounded rerun passed.
+
+Details: `docs/REALTIME_LIVE_CANARY.md`.
+
+Still **not** claimed by this checkpoint:
+
+- live model function/tool execution through local approval;
 - automatic provider transport reconnect/resume hardening;
 - voice/audio UX;
 - production Supabase configuration/login UX;
 - production backend/cloud deployment;
+- shipping Mac Keychain session → deployed backend → OpenAI credential path;
 - broader Mac click/type/file/process/shell/screen tool surface.
-
-Details: `docs/REALTIME_ORCHESTRATOR_MAC_CONTROL.md`.
 
 ## Authentication foundation
 
@@ -342,14 +361,23 @@ Existing foundation:
 - [x] Selective Memory → Context integration.
 - [x] Provider-neutral realtime session/provider contract integrated with orchestrator.
 - [x] Real Mac read/action executor capabilities invoked through orchestrator.
+- [x] Production OpenAI Realtime text adapter exercised on a bounded real network canary.
 
 ---
 
-# 4. Realtime AI → Orchestrator → Mac Executor — FIRST TEXT SLICE IMPLEMENTED
+# 4. Realtime AI → Orchestrator → Mac Executor — FIRST TEXT SLICE MERGED + LIVE TEXT CANARY PASSED
 
-Branch:
+Merged implementation:
 
-`core/realtime-orchestrator-mac-control`
+- PR #17
+- feature head `dc46ad1179c06eced8b7cab7292377eec60715bd`
+- merge commit `8496fd7ef707653c71224ec18bd6ef2483a63cfb`
+
+Live-provider validation:
+
+- branch `core/realtime-live-canary`
+- successful commit `f1c12c59a21143b8109ca0a127fd41056c2185ba`
+- Actions run `36239995353`
 
 Target/implemented flow:
 
@@ -414,7 +442,7 @@ Windows remains deferred. The first real executor slice is macOS only.
 
 ### Text/control before voice
 
-Text/control correctness is implemented and deterministically tested. Voice/audio remains a later layer over the same provider-neutral session/orchestration boundary.
+Text/control correctness is implemented, deterministically tested, and the provider text-network boundary has now been validated live. Voice/audio remains a later layer over the same provider-neutral session/orchestration boundary.
 
 ## Realtime session layer
 
@@ -490,7 +518,8 @@ Provider-specific implementation lives outside AgentCore.
 - [x] Cancellation translation.
 - [x] Provider failure sanitization and response bounds.
 - [x] Fake-WebSocket deterministic adapter tests.
-- [ ] Live paid OpenAI Realtime canary.
+- [x] **Bounded live paid OpenAI Realtime text-network canary passed.**
+- [ ] Live provider function/tool-call canary through local approval.
 - [ ] Automatic reconnect/resume after broken transport.
 - [ ] Audio transport/turn UX.
 
@@ -522,14 +551,15 @@ Implemented:
 - [x] Server-side provider request is bounded and sanitized.
 - [x] Mac credential client uses HTTPS/loopback restrictions, no redirects/cookies/cache and bounded responses/timeouts.
 - [x] Current Mac text UI checks Keychain agent session before enabling Send.
+- [x] Real OpenAI client-secret mint + short-lived-credential WebSocket text session validated in the bounded CI canary.
 
 Still open:
 
 - [ ] Production backend endpoint deployment/configuration.
 - [ ] Consumer login flow that creates the Keychain agent session in the shipping app.
-- [ ] Live short-lived-credential → Realtime network canary.
+- [ ] Shipping Mac Keychain session → deployed backend credential endpoint → Realtime network validation.
 
-## Deterministic tests
+## Deterministic and live tests
 
 - [x] Fake realtime provider drives user turn → semantic intent → orchestrator → executor → typed result → assistant response.
 - [x] Provider event cannot choose authenticated principal.
@@ -544,28 +574,31 @@ Still open:
 - [x] Context/memory trust labels survive realtime compilation.
 - [x] Actual MacRuntime read/action tool types are exercised behind the semantic loop.
 - [x] Short-lived Realtime credential client/broker error cases are tested.
-- [x] Backend embedded + native PostgreSQL gates pass on latest validated code head.
-- [x] Portable AgentCore gate passes on latest validated code head.
-- [x] Native macOS tests/app bundle pass on latest validated code head.
+- [x] Backend embedded + native PostgreSQL gates passed on merged realtime head.
+- [x] Portable AgentCore gate passed on merged realtime head.
+- [x] Native macOS tests/app bundle passed on merged realtime head.
+- [x] One real paid Realtime text-network canary passed on the production Swift adapter.
+- [x] Successful live canary logs were audited for credential leakage.
 
 ## Definition of done for this first text/control slice
 
-The deterministic first slice is considered implemented because:
+The first slice is considered implemented and live-provider text validated because:
 
 1. a user text turn enters a provider-neutral realtime session;
 2. the turn is bound to trusted `TenantContext`, session/interface and local device state;
 3. the orchestrator compiles allowed context and opt-in memory;
 4. a semantic tool intent is validated and resolved locally;
-5. real native Mac read + action tool types execute end-to-end;
+5. real native Mac read + action tool types execute end-to-end in deterministic/native integration tests;
 6. write approval remains exact/single-use/replay-safe;
 7. typed results return to the realtime session;
 8. duplicate provider events cannot repeat a committed action;
 9. provider/model payloads have no authority to select another principal;
 10. portable/native/backend deterministic CI gates pass;
 11. the Mac has a user-visible text interface using the same path;
-12. long-lived model-provider credentials remain server-side in the production design.
+12. long-lived model-provider credentials remain server-side in the production design;
+13. the production Swift OpenAI adapter completed one bounded real text-network canary with short-lived credential minting and secret-safe logs.
 
-A live provider canary is intentionally a separate bounded validation step, not silently implied by deterministic completion.
+This does **not** imply that live function calling, production deployment, reconnect/resume, or voice are complete.
 
 ---
 
@@ -813,10 +846,12 @@ Implemented:
 
 Still required:
 
-- [ ] Live semantic/provider-backed isolation canary.
+- [ ] Live semantic/tool/provider-backed isolation canary.
 - [ ] Tenant-scoped jobs.
 - [ ] Tenant-scoped artifacts.
 - [ ] Production logging/backup policy.
+
+The successful text-only OpenAI canary did not carry a live tool call and therefore does not close the live semantic/tool isolation item.
 
 ---
 
@@ -910,6 +945,7 @@ Implemented:
 
 Still open:
 
+- [ ] Live provider function-call → local approval → native execution canary.
 - [ ] Cross-interface approval UX.
 - [ ] Semantic-effect risk escalation beyond native descriptor risk.
 - [ ] Remote-device approval handoff.
@@ -936,6 +972,7 @@ Implemented:
 - [x] Native executor names are hidden behind semantic capability mapping.
 - [x] Long-lived OpenAI API key remains server-side in the production Realtime credential design.
 - [x] Realtime provider/client errors are sanitized for current paths.
+- [x] Bounded live OpenAI canary log audit showed the long-lived key masked and no short-lived credential emitted.
 
 Still open:
 
@@ -964,21 +1001,24 @@ Current status:
 12. [ ] Provider migration/dual-write/shadow read.
 13. [ ] Shared workspace/ACL when required.
 14. [x] **Realtime text session + semantic capability loop + first real Mac read/action slice.**
-15. [ ] Bounded live Realtime provider canary + reconnect hardening.
-16. [ ] Job Manager.
-17. [ ] Broader Mac capability surface (`windows/process/file/click/type/shell/screen`).
-18. [ ] Production auth/backend deployment and consumer login UX.
-19. [ ] Mobile/desktop interface expansion.
-20. [ ] Voice/audio UX.
-21. [ ] Future glasses integration.
-22. [ ] Windows executor — deferred for current phase.
+15. [x] **Bounded live OpenAI Realtime text-network canary.**
+16. [ ] Realtime reconnect/resume hardening.
+17. [ ] Live provider function/tool-call + local approval canary.
+18. [ ] Job Manager.
+19. [ ] Broader Mac capability surface (`windows/process/file/click/type/shell/screen`).
+20. [ ] Production auth/backend deployment and consumer login UX.
+21. [ ] Mobile/desktop interface expansion.
+22. [ ] Voice/audio UX.
+23. [ ] Future glasses integration.
+24. [ ] Windows executor — deferred for current phase.
 
-Security milestones completed:
+Security/validation milestones completed:
 
 - [x] Provider-neutral authentication/session foundation.
 - [x] Canonical PostgreSQL memory bridge.
 - [x] Memory → Context Compiler integration.
 - [x] Exact local realtime action approval/replay boundary for first Mac slice.
+- [x] Secret-safe bounded real OpenAI Realtime text-network canary.
 
 ---
 
@@ -1024,4 +1064,5 @@ Until then, this file remains the active architecture and implementation checkli
 - `docs/SUPERMEMORY_ADAPTER.md` — Supermemory adapter contract/capabilities.
 - `docs/SUPERMEMORY_LIVE_VALIDATION.md` — bounded live-canary procedure.
 - `docs/VALIDATION.md` — repository validation expectations/history.
-- `docs/REALTIME_ORCHESTRATOR_MAC_CONTROL.md` — implemented deterministic text-control milestone and remaining live/voice hardening.
+- `docs/REALTIME_ORCHESTRATOR_MAC_CONTROL.md` — merged deterministic text-control milestone, live text-provider validation, and remaining tool/voice/deployment hardening.
+- `docs/REALTIME_LIVE_CANARY.md` — bounded real OpenAI Realtime text-network canary procedure and successful validation record.
