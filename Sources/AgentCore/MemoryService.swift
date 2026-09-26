@@ -163,14 +163,15 @@ public actor MemoryService {
                                 remaining: latest.synchronization.entries.filter { !$0.acknowledged }.count, failures: failures)
     }
 
-    /// Selective retrieval for model context. Canonical mode works with provider
-    /// processing disabled. Provider mode still resolves every hit back through
-    /// canonical state, so a provider can rank memories but cannot authoritatively
-    /// inject forgotten, historical, cross-scope, or foreign-principal content.
+    /// Selective retrieval for model context. Provider choice is supplied by
+    /// trusted infrastructure, not semantic/model query data. Canonical mode works
+    /// with provider processing disabled. Provider mode still resolves every hit
+    /// back through canonical state.
     public func retrieveForContext(_ query: MemoryContextQuery,
+                                   strategy: MemoryContextRetrievalStrategy = .canonical,
                                    as caller: TenantContext) async throws -> [RetrievedMemory] {
         try requireOwner(caller)
-        switch query.strategy {
+        switch strategy {
         case .canonical:
             return try await canonicalContextSearch(query)
         case .provider(let providerID):
