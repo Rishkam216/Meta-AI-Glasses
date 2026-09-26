@@ -1,6 +1,11 @@
 # Calculator execution validation
 
-Status: **Implementation prepared; native CI and manual live Mac validation pending.**
+Status: **Implementation CI validated; manual live Mac validation pending.**
+
+Implementation commit: `373e20354f13cfd65c821665ce19d4b7d5f3def0` (PR #19).
+Native workflow `36262825289` passed all **243 Swift tests**, including all five
+new Calculator tests, compiled both canary executables, and built/verified the
+native app. Portable core `36262825249` and backend `36262825361` also passed.
 
 This is one bounded milestone after PR #18, not a voice, login, deployment, or
 general computer-control expansion. The baseline is `805c7f0`, whose Backend,
@@ -51,6 +56,7 @@ network test, then paste the short-lived `ek_` credential into its hidden prompt
 Do not supply a standard API key, a shell argument, or a credential in a command
 saved to shell history. The executable does not load production identity/memory;
 its random diagnostic principal is limited to a fresh in-memory context store.
+If the terminal is force-killed while echo is disabled, restore it with `stty echo`.
 
 When the real model proposes the action, the terminal displays the exact native
 tool and Calculator bundle identifier. Only typing `ALLOW CALCULATOR` approves it.
@@ -89,7 +95,9 @@ login, backend deployment, reconnect/resume, or voice. Those remain separate wor
 
 - Local existing offline canary suite: **22 passed**.
 - Local backend suite: **54 passed, 0 failed, 3 native-only skipped**.
-- New Swift tests and both canary builds: pending macOS CI.
+- Native Swift tests: **243 passed**, including all five new stitched tests.
+- Both canary executables and native app bundle: **built successfully in CI**.
+- Portable Swift and embedded/native PostgreSQL CI: **passed**.
 - Live network calls made during this implementation session: **none**.
 - Real model → local human approval → native Calculator launch: **not yet run**.
 
