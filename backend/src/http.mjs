@@ -1,20 +1,23 @@
 import { APIError } from './memory.mjs';
 
-export function createMemoryHandler(backend) {
+export function createMemoryHandler(backend, realtimeCredentials = null) {
   return async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     try {
       const canonicalEndpoint = req.url === '/v1/memory/canonical';
-      if (req.method !== 'POST' || (!canonicalEndpoint && req.url !== '/v1/memory'))
+      const memoryEndpoint = req.url === '/v1/memory';
+      const realtimeEndpoint = req.url === '/v1/realtime/credential';
+      if (req.method !== 'POST' || (!canonicalEndpoint && !memoryEndpoint && !realtimeEndpoint))
         throw new APIError(404, 'not_found');
-      if (req.headers['content-type']?.split(';')[0] !== 'application/json') throw new APIError(415, 'json_required');
+      if (req.headers['content-type']?.split(';')[0] !== 'application/json')
+        throw new APIError(415, 'json_required');
+
       // A reverse proxy must also impose body/header/time/rate limits. No CORS,
-      // cookies or query-string credentials. The legacy endpoint keeps its
-      // original small bound; the canonical v3 endpoint permits an 8 MiB
-      // snapshot plus bounded wrapper overhead.
-      const maximumBytes = canonicalEndpoint ? 9 * 1024 * 1024 : 40000;
+      // cookies or query-string credentials. Realtime credential requests accept
+      // no client-selected model or identity fields and remain intentionally tiny.
+      const maximumBytes = canonicalEndpoint ? 9 * 1024 * 1024 : realtimeEndpoint ? 1024 : 40000;
       let size = 0; const chunks = [];
       for await (const chunk of req) {
         size += chunk.length;
@@ -24,9 +27,19 @@ export function createMemoryHandler(backend) {
       let request;
       try { request = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
       catch { throw new APIError(400, 'invalid_json'); }
-      if (canonicalEndpoint && !['identity','canonical_load','canonical_commit'].includes(request?.operation))
-        throw new APIError(400, 'unknown_operation');
-      const result = await backend.execute(req.headers.authorization, request);
+
+      let result;
+      if (realtimeEndpoint) {
+        if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).length !== 0)
+          throw new APIError(400, 'invalid_request');
+        if (!realtimeCredentials) throw new APIError(503, 'realtime_unavailable');
+        result = await realtimeCredentials.mint(req.headers.authorization);
+      } else {
+        if (canonicalEndpoint && !['identity','canonical_load','canonical_commit'].includes(request?.operation))
+          throw new APIError(400, 'unknown_operation');
+        result = await backend.execute(req.headers.authorization, request);
+      }
+
       res.statusCode = 200;
       res.end(JSON.stringify({ result }));
     } catch (error) {
