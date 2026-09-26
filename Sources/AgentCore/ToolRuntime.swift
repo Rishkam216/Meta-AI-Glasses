@@ -4,17 +4,6 @@ public protocol PermissionChecking: Sendable {
     func isGranted(_ permission: Permission) async -> Bool
 }
 
-/// Milestone 1 has no approval issuer. Non-read actions always fail closed.
-public struct ReadOnlyPolicy: Sendable {
-    public init() {}
-    public func check(_ descriptor: ToolDescriptor) throws {
-        guard descriptor.risk == .read else {
-            throw ToolFailure(code: .approvalRequired,
-                              message: "This action requires approval. This runtime currently permits reads only.")
-        }
-    }
-}
-
 public enum RegistryError: Error { case duplicateTool(String) }
 
 public actor ToolRuntime {
@@ -25,11 +14,13 @@ public actor ToolRuntime {
     private var tools: [String: Entry] = [:]
     private let audit: any AuditSink
     private let permissions: any PermissionChecking
-    private let policy = ReadOnlyPolicy()
+    private let approvals: any ApprovalAuthorizing
 
-    public init(audit: any AuditSink, permissions: any PermissionChecking) {
+    public init(audit: any AuditSink, permissions: any PermissionChecking,
+                approvals: any ApprovalAuthorizing = DenyAllApprovals()) {
         self.audit = audit
         self.permissions = permissions
+        self.approvals = approvals
     }
 
     public func register<T: Tool>(_ tool: T) throws {
@@ -63,7 +54,9 @@ public actor ToolRuntime {
             guard let entry else {
                 throw ToolFailure(code: .unknownTool, message: "The requested capability is not registered.")
             }
-            try policy.check(entry.descriptor)
+            if entry.descriptor.risk != .read {
+                try await approvals.authorize(request, descriptor: entry.descriptor)
+            }
             for permission in entry.descriptor.permissions {
                 guard await permissions.isGranted(permission) else {
                     throw ToolFailure(code: .permissionRequired,

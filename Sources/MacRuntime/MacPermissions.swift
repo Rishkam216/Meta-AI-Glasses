@@ -3,6 +3,8 @@ import ApplicationServices
 import CoreGraphics
 
 public struct MacPermissions: PermissionChecking {
+    private static let accessibilityPromptOptionKey = "AXTrustedCheckOptionPrompt"
+
     public init() {}
 
     public func isGranted(_ permission: Permission) async -> Bool {
@@ -21,7 +23,10 @@ public struct MacPermissions: PermissionChecking {
     /// Prompting is asynchronous; this return value is not an approval.
     @MainActor
     public static func requestAccessibility() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        // The C SDK exposes kAXTrustedCheckOptionPrompt as mutable global state,
+        // which Swift 6 strict concurrency rejects even on MainActor. Its public
+        // dictionary key is stable, so use the key value without touching that global.
+        let options = [accessibilityPromptOptionKey: true]
         _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
 }

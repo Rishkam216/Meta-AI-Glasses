@@ -1,6 +1,6 @@
 import Foundation
 
-public enum RiskLevel: String, Codable, Sendable {
+public enum RiskLevel: String, Codable, Sendable, Hashable {
     case read
     case reversibleWrite = "reversible_write"
     case externalEffect = "external_effect"
@@ -36,15 +36,30 @@ public protocol Tool: Sendable {
     func execute(_ input: Input) async throws -> Output
 }
 
+public struct RequestContext: Codable, Sendable, Equatable {
+    public let deviceID: UUID
+    public let sessionID: UUID
+
+    public init(deviceID: UUID, sessionID: UUID) {
+        self.deviceID = deviceID
+        self.sessionID = sessionID
+    }
+}
+
 public struct ToolRequest: Codable, Sendable {
     public let id: UUID
     public let tool: String
     public let arguments: JSONValue
+    public let context: RequestContext?
+    public let approvalID: UUID?
 
-    public init(id: UUID = UUID(), tool: String, arguments: JSONValue = .object([:])) {
+    public init(id: UUID = UUID(), tool: String, arguments: JSONValue = .object([:]),
+                context: RequestContext? = nil, approvalID: UUID? = nil) {
         self.id = id
         self.tool = tool
         self.arguments = arguments
+        self.context = context
+        self.approvalID = approvalID
     }
 }
 
