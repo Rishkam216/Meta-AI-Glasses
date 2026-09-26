@@ -11,9 +11,12 @@ public struct RealtimeCoordinator: Sendable {
     }
 
     private let orchestrator: AgentOrchestrator
+    private let approvalProvider: (any RealtimeApprovalProviding)?
 
-    public init(orchestrator: AgentOrchestrator) {
+    public init(orchestrator: AgentOrchestrator,
+                approvalProvider: (any RealtimeApprovalProviding)? = nil) {
         self.orchestrator = orchestrator
+        self.approvalProvider = approvalProvider
     }
 
     public func runTurn(_ request: RealtimeTurnRequest,
@@ -92,8 +95,9 @@ public struct RealtimeCoordinator: Sendable {
                     throw RealtimeProtocolError.toolCallLimitExceeded
                 }
 
-                let result = await executeToolIntent(
+                let result = try await executeToolIntent(
                     toolIntent,
+                    turnID: request.id,
                     trustedDeviceID: request.explicitDeviceID,
                     invocation: invocation
                 )
@@ -141,12 +145,13 @@ public struct RealtimeCoordinator: Sendable {
     }
 
     private func executeToolIntent(_ intent: RealtimeToolIntent,
+                                   turnID: UUID,
                                    trustedDeviceID: UUID?,
-                                   invocation: AgentInvocationContext) async -> ToolResult {
+                                   invocation: AgentInvocationContext) async throws -> ToolResult {
         do {
-            // Device identity comes from the trusted turn request/session state,
-            // never from the provider-generated tool intent.
-            return try await orchestrator.execute(
+            // Device identity comes from trusted turn/session state. The provider
+            // supplies only tool + JSON arguments and cannot carry approval IDs.
+            let prepared = try await orchestrator.prepare(
                 ToolIntent(
                     tool: intent.tool,
                     arguments: intent.arguments,
@@ -154,8 +159,37 @@ public struct RealtimeCoordinator: Sendable {
                     approvalID: nil,
                     decisionState: .object([:])
                 ),
-                in: invocation
+                in: invocation,
+                requestID: intent.eventID
             )
+
+            var approvalID: UUID?
+            if prepared.descriptor.risk != .read {
+                guard let approvalProvider else {
+                    return approvalRequiredResult(for: prepared)
+                }
+                try Task.checkCancellation()
+                approvalID = try await approvalProvider.requestApproval(
+                    RealtimeApprovalRequest(
+                        sourceEventID: intent.eventID,
+                        turnID: turnID,
+                        descriptor: prepared.descriptor,
+                        arguments: prepared.arguments,
+                        context: prepared.context
+                    )
+                )
+                try Task.checkCancellation()
+                guard approvalID != nil else {
+                    return approvalRequiredResult(for: prepared)
+                }
+            }
+
+            return try await orchestrator.execute(
+                prepared,
+                approvalID: approvalID
+            )
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             let fallbackRequest = ToolRequest(
                 id: intent.eventID,
@@ -172,5 +206,15 @@ public struct RealtimeCoordinator: Sendable {
                 )
             )
         }
+    }
+
+    private func approvalRequiredResult(for prepared: PreparedToolExecution) -> ToolResult {
+        ToolResult(
+            request: prepared.request(),
+            error: ToolFailure(
+                code: .approvalRequired,
+                message: "This action requires a fresh local approval."
+            )
+        )
     }
 }
