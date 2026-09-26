@@ -163,6 +163,27 @@ public actor MemoryService {
                                 remaining: latest.synchronization.entries.filter { !$0.acknowledged }.count, failures: failures)
     }
 
+    /// Selective retrieval for model context. Provider choice is supplied by
+    /// trusted infrastructure, not semantic/model query data. Canonical mode works
+    /// with provider processing disabled. Provider mode still resolves every hit
+    /// back through canonical state.
+    public func retrieveForContext(_ query: MemoryContextQuery,
+                                   strategy: MemoryContextRetrievalStrategy = .canonical,
+                                   as caller: TenantContext) async throws -> [RetrievedMemory] {
+        try requireOwner(caller)
+        switch strategy {
+        case .canonical:
+            return try await canonicalContextSearch(query)
+        case .provider(let providerID):
+            let providerQuery = try MemorySearchQuery(
+                text: query.text,
+                scopes: query.scopes,
+                limit: query.limit
+            )
+            return try await search(providerQuery, providerID: providerID, as: caller)
+        }
+    }
+
     public func search(_ query: MemorySearchQuery, providerID: String,
                        as caller: TenantContext) async throws -> [RetrievedMemory] {
         try requireOwner(caller)
@@ -186,6 +207,81 @@ public actor MemoryService {
         catch is CancellationError { throw CancellationError() }
         catch { throw MemoryProviderError.unavailable }
         return try await resolve(response, providerID: providerID, scopes: scopes, limit: limit)
+    }
+
+    private func canonicalContextSearch(_ query: MemoryContextQuery) async throws -> [RetrievedMemory] {
+        // Canonical fallback is intentionally bounded but ranks across the full
+        // available ledger page per requested scope instead of pre-truncating the
+        // candidate set based on the desired result count.
+        let candidateLimit = 100
+        let scopes = query.scopes.sorted {
+            if $0.kind.rawValue != $1.kind.rawValue {
+                return $0.kind.rawValue < $1.kind.rawValue
+            }
+            return ($0.referenceID ?? "") < ($1.referenceID ?? "")
+        }
+
+        var records: [UUID: MemoryRecord] = [:]
+        for scope in scopes {
+            let ledgerQuery = try MemoryLedgerQuery(
+                scope: scope,
+                includeSuperseded: false,
+                limit: candidateLimit
+            )
+            for record in try await ledger.query(ledgerQuery, as: principal) {
+                guard record.tenant == principal,
+                      record.state == .active,
+                      query.scopes.contains(record.scope) else {
+                    throw MemoryContextError.invalidResponse
+                }
+                records[record.id] = record
+            }
+        }
+
+        let queryTokens = memorySearchTokens(query.text)
+        guard !queryTokens.isEmpty else { throw MemoryContextError.invalidQuery }
+        let normalizedQuery = query.text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        let ranked = try records.values.compactMap { record -> RetrievedMemory? in
+            let contentData = try JSONEncoder().encode(record.content)
+            guard let contentText = String(data: contentData, encoding: .utf8)?.lowercased() else {
+                throw MemoryContextError.invalidResponse
+            }
+            let contentTokens = memorySearchTokens(contentText)
+            let overlap = queryTokens.intersection(contentTokens)
+            let exactPhrase = contentText.contains(normalizedQuery)
+            guard exactPhrase || !overlap.isEmpty else { return nil }
+
+            let coverage = Double(overlap.count) / Double(queryTokens.count)
+            let specificity = contentTokens.isEmpty ? 0 : Double(overlap.count) / Double(contentTokens.count)
+            let confidence = record.confidence ?? 0.5
+            let score = min(1.0,
+                            (coverage * 0.72) +
+                            (specificity * 0.13) +
+                            (exactPhrase ? 0.10 : 0.0) +
+                            (confidence * 0.05))
+            return RetrievedMemory(record: record, score: score)
+        }
+
+        return ranked.sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
+            if $0.record.updatedAt != $1.record.updatedAt {
+                return $0.record.updatedAt > $1.record.updatedAt
+            }
+            return $0.record.id.uuidString < $1.record.id.uuidString
+        }
+        .prefix(query.limit)
+        .map { $0 }
+    }
+
+    private func memorySearchTokens(_ text: String) -> Set<String> {
+        Set(text.lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+            .filter { $0.count > 1 }
+            .prefix(128))
     }
 
     private func resolve(_ response: MemoryProviderResults, providerID: String,

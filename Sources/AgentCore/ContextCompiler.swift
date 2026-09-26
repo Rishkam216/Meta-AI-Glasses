@@ -11,6 +11,8 @@ public enum ContextCompilationError: Error, Sendable, Equatable {
     case invalidMaxBytes
     case invalidMaxRefreshItems
     case invalidAllowedKey
+    case memoryRetrievalRequiresOptIn
+    case memoryRetrievalNotAllowed
 }
 
 public struct ContextCompilationRequest: Sendable, Equatable {
@@ -29,6 +31,7 @@ public struct ContextCompilationRequest: Sendable, Equatable {
     public let maxBytes: Int
     public let refreshStaleEphemeral: Bool
     public let maxRefreshItems: Int
+    public let memoryQuery: MemoryContextQuery?
 
     public init(consumer: ContextConsumerKind,
                 sessionID: UUID? = nil,
@@ -44,7 +47,8 @@ public struct ContextCompilationRequest: Sendable, Equatable {
                 maxItems: Int = 32,
                 maxBytes: Int = 32_768,
                 refreshStaleEphemeral: Bool = true,
-                maxRefreshItems: Int = 8) throws {
+                maxRefreshItems: Int = 8,
+                memoryQuery: MemoryContextQuery? = nil) throws {
         guard (1...100).contains(maxItems) else {
             throw ContextCompilationError.invalidMaxItems
         }
@@ -62,6 +66,14 @@ public struct ContextCompilationRequest: Sendable, Equatable {
                 }
             }
         }
+        if memoryQuery != nil {
+            guard includeMemory else {
+                throw ContextCompilationError.memoryRetrievalRequiresOptIn
+            }
+            guard consumer != .boundedDecision else {
+                throw ContextCompilationError.memoryRetrievalNotAllowed
+            }
+        }
         self.consumer = consumer
         self.sessionID = sessionID
         self.interfaceID = interfaceID
@@ -77,6 +89,7 @@ public struct ContextCompilationRequest: Sendable, Equatable {
         self.maxBytes = maxBytes
         self.refreshStaleEphemeral = refreshStaleEphemeral
         self.maxRefreshItems = maxRefreshItems
+        self.memoryQuery = memoryQuery
     }
 }
 
@@ -117,6 +130,20 @@ public struct ContextRefreshSummary: Codable, Sendable, Equatable {
     )
 }
 
+public struct MemoryRetrievalSummary: Codable, Sendable, Equatable {
+    public let requested: Bool
+    public let retrieved: Int
+    public let acceptedForRequestedScopes: Int
+    public let failed: Bool
+
+    public static let none = MemoryRetrievalSummary(
+        requested: false,
+        retrieved: 0,
+        acceptedForRequestedScopes: 0,
+        failed: false
+    )
+}
+
 public struct CompiledContext: Codable, Sendable, Equatable {
     public let consumer: ContextConsumerKind
     public let items: [CompiledContextItem]
@@ -125,16 +152,20 @@ public struct CompiledContext: Codable, Sendable, Equatable {
     public let omittedByBudgetCount: Int
     public let encodedBytes: Int
     public let refreshSummary: ContextRefreshSummary
+    public let memoryRetrievalSummary: MemoryRetrievalSummary
 }
 
 public struct ContextCompiler: Sendable {
     private let store: any ContextStoring
     private let refresher: (any ContextRefreshing)?
+    private let memoryRetriever: (any MemoryContextRetrieving)?
 
     public init(store: any ContextStoring,
-                refresher: (any ContextRefreshing)? = nil) {
+                refresher: (any ContextRefreshing)? = nil,
+                memoryRetriever: (any MemoryContextRetrieving)? = nil) {
         self.store = store
         self.refresher = refresher
+        self.memoryRetriever = memoryRetriever
     }
 
     public func compile(_ request: ContextCompilationRequest,
@@ -159,6 +190,19 @@ public struct ContextCompiler: Sendable {
             for item in await store.query(query, as: principal, now: now) {
                 unique[item.id] = item
             }
+        }
+
+        let memoryResult = try await retrieveMemoryIfNeeded(
+            request,
+            scopes: scopes,
+            principal: principal,
+            now: now
+        )
+        // Existing Context Service state wins UUID collisions. A retrieval adapter
+        // can add relevant memory but cannot overwrite a stored item with a
+        // different trust/source classification.
+        for item in memoryResult.items where unique[item.id] == nil {
+            unique[item.id] = item
         }
 
         let allowed = allowedTrust(for: request)
@@ -208,8 +252,126 @@ public struct ContextCompiler: Sendable {
             omittedByPolicyCount: omittedByPolicy,
             omittedByBudgetCount: omittedByBudget,
             encodedBytes: encodedBytes,
-            refreshSummary: refreshSummary
+            refreshSummary: refreshSummary,
+            memoryRetrievalSummary: memoryResult.summary
         )
+    }
+
+    private func retrieveMemoryIfNeeded(_ request: ContextCompilationRequest,
+                                        scopes: Set<ContextScope>,
+                                        principal: TenantContext,
+                                        now: Date) async throws -> (items: [ContextItem], summary: MemoryRetrievalSummary) {
+        guard let memoryQuery = request.memoryQuery else { return ([], .none) }
+
+        // If the caller requested specific keys and excluded the reserved memory
+        // key, avoid a memory lookup entirely rather than retrieving data that the
+        // compiler is guaranteed to discard.
+        if let requestedKeys = request.requestedKeys,
+           !requestedKeys.contains("memory") {
+            return ([], MemoryRetrievalSummary(
+                requested: true,
+                retrieved: 0,
+                acceptedForRequestedScopes: 0,
+                failed: false
+            ))
+        }
+
+        let compilerMemoryScopes = try allowedMemoryScopes(from: scopes)
+        let effectiveScopes = memoryQuery.scopes.intersection(compilerMemoryScopes)
+        guard !effectiveScopes.isEmpty else {
+            // Scope rejection happens before memory retrieval, so a semantic query
+            // cannot probe whether a disallowed project/workspace contains a hit.
+            return ([], MemoryRetrievalSummary(
+                requested: true,
+                retrieved: 0,
+                acceptedForRequestedScopes: 0,
+                failed: false
+            ))
+        }
+
+        guard let memoryRetriever else {
+            return ([], MemoryRetrievalSummary(
+                requested: true,
+                retrieved: 0,
+                acceptedForRequestedScopes: 0,
+                failed: true
+            ))
+        }
+
+        do {
+            let effectiveQuery = try MemoryContextQuery(
+                text: memoryQuery.text,
+                scopes: effectiveScopes,
+                limit: memoryQuery.limit,
+                maxBytes: memoryQuery.maxBytes
+            )
+            let retrieved = try await memoryRetriever.retrieve(
+                effectiveQuery,
+                as: principal,
+                now: now
+            )
+
+            var accepted: [ContextItem] = []
+            accepted.reserveCapacity(retrieved.count)
+            for item in retrieved {
+                guard item.isOwned(by: principal) else {
+                    throw ContextAccessError.principalMismatch
+                }
+                guard item.provenance.trust == .memory,
+                      item.provenance.origin == .memoryService,
+                      item.key == "memory",
+                      scopes.contains(item.scope) else {
+                    throw MemoryContextError.invalidResponse
+                }
+                accepted.append(item)
+            }
+
+            return (accepted, MemoryRetrievalSummary(
+                requested: true,
+                retrieved: retrieved.count,
+                acceptedForRequestedScopes: accepted.count,
+                failed: false
+            ))
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch ContextAccessError.principalMismatch {
+            throw ContextAccessError.principalMismatch
+        } catch MemoryContextError.ownershipMismatch {
+            throw ContextAccessError.principalMismatch
+        } catch {
+            // Personalization is optional. Any provider/storage/validation failure
+            // degrades to no live memory rather than widening scope, changing
+            // identity, or altering authorization behavior.
+            return ([], MemoryRetrievalSummary(
+                requested: true,
+                retrieved: 0,
+                acceptedForRequestedScopes: 0,
+                failed: true
+            ))
+        }
+    }
+
+    private func allowedMemoryScopes(from contextScopes: Set<ContextScope>) throws -> Set<MemoryScope> {
+        var allowed: Set<MemoryScope> = []
+        for scope in contextScopes {
+            switch scope.kind {
+            case .user:
+                allowed.insert(.user)
+            case .project:
+                guard let referenceID = scope.referenceID else {
+                    throw ContextValidationError.emptyScopeReference
+                }
+                allowed.insert(try .project(referenceID))
+            case .workspace:
+                guard let referenceID = scope.referenceID else {
+                    throw ContextValidationError.emptyScopeReference
+                }
+                allowed.insert(try .workspace(referenceID))
+            case .session, .interface, .device, .task, .application, .connectedService:
+                continue
+            }
+        }
+        return allowed
     }
 
     private func refreshIfNeeded(_ request: ContextCompilationRequest,
@@ -301,12 +463,13 @@ public struct ContextCompiler: Sendable {
 
     private func specificity(of item: ContextItem,
                              for request: ContextCompilationRequest) -> Int {
-        if let taskID = request.taskID, item.scope == .task(taskID) { return 5 }
-        if let deviceID = request.deviceID, item.scope == .device(deviceID) { return 4 }
+        if let taskID = request.taskID, item.scope == .task(taskID) { return 6 }
+        if let deviceID = request.deviceID, item.scope == .device(deviceID) { return 5 }
         if let interfaceID = request.interfaceID,
            item.scope.kind == .interface,
-           item.scope.referenceID == interfaceID.uuidString { return 3 }
-        if let sessionID = request.sessionID, item.scope == .session(sessionID) { return 2 }
+           item.scope.referenceID == interfaceID.uuidString { return 4 }
+        if let sessionID = request.sessionID, item.scope == .session(sessionID) { return 3 }
+        if request.additionalScopes.contains(item.scope) { return 2 }
         if item.scope == .user { return 1 }
         return 0
     }
