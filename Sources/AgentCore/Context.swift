@@ -43,6 +43,7 @@ public enum ContextScopeKind: String, Codable, Sendable, Hashable {
     case device
     case task
     case project
+    case workspace
     case application
     case connectedService = "connected_service"
 }
@@ -91,6 +92,14 @@ public struct ContextScope: Codable, Sendable, Hashable {
         ContextScope(validatedKind: .task, referenceID: id.uuidString)
     }
 
+    public static func project(_ id: String) throws -> ContextScope {
+        try ContextScope(kind: .project, referenceID: id)
+    }
+
+    public static func workspace(_ id: String) throws -> ContextScope {
+        try ContextScope(kind: .workspace, referenceID: id)
+    }
+
     private init(validatedKind: ContextScopeKind, referenceID: String?) {
         kind = validatedKind
         self.referenceID = referenceID
@@ -114,6 +123,7 @@ public enum ContextOrigin: String, Codable, Sendable, Hashable {
     case tool
     case externalService = "external_service"
     case memoryProvider = "memory_provider"
+    case memoryService = "memory_service"
     case model
     case applicationAdapter = "application_adapter"
 }
