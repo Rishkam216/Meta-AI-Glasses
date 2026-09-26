@@ -67,14 +67,10 @@ private actor RealtimeMemoryDecisionProvider: DecisionProvider {
     }
 }
 
-private actor RealtimeMemoryDevice: DeviceExecuting {
-    nonisolated let identity: DeviceIdentity
+private struct RealtimeMemoryDevice: DeviceExecuting {
+    let identity: DeviceIdentity
 
-    init(identity: DeviceIdentity) {
-        self.identity = identity
-    }
-
-    func capabilities() -> [ToolDescriptor] {
+    func capabilities() async -> [ToolDescriptor] {
         [ToolDescriptor(
             name: "ui.get_frontmost_app",
             summary: "Read active app for capability discovery.",
@@ -83,7 +79,7 @@ private actor RealtimeMemoryDevice: DeviceExecuting {
         )]
     }
 
-    func execute(_ request: ToolRequest) -> ToolResult {
+    func execute(_ request: ToolRequest) async -> ToolResult {
         ToolResult(request: request, data: .string("unused"))
     }
 }
@@ -122,8 +118,10 @@ private actor RealtimeMemoryDevice: DeviceExecuting {
 
     _ = try await coordinator.runTurn(turn, in: invocation, using: session)
 
-    #expect(await memory.principals == [principal])
-    #expect(await memory.queries == [memoryQuery])
+    let principals = await memory.principals
+    let queries = await memory.queries
+    #expect(principals == [principal])
+    #expect(queries == [memoryQuery])
 
     let sent = await session.sent
     guard case .turnContext(let providerContext)? = sent.first else {
