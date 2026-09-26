@@ -192,13 +192,18 @@ public struct ContextCompiler: Sendable {
             }
         }
 
-        let memorySummary = try await retrieveMemoryIfNeeded(
+        let memoryResult = try await retrieveMemoryIfNeeded(
             request,
             scopes: scopes,
             principal: principal,
-            now: now,
-            into: &unique
+            now: now
         )
+        // Existing Context Service state wins UUID collisions. A retrieval adapter
+        // can add relevant memory but cannot overwrite a stored item with a
+        // different trust/source classification.
+        for item in memoryResult.items where unique[item.id] == nil {
+            unique[item.id] = item
+        }
 
         let allowed = allowedTrust(for: request)
         let ordered = unique.values.sorted { lhs, rhs in
@@ -248,37 +253,36 @@ public struct ContextCompiler: Sendable {
             omittedByBudgetCount: omittedByBudget,
             encodedBytes: encodedBytes,
             refreshSummary: refreshSummary,
-            memoryRetrievalSummary: memorySummary
+            memoryRetrievalSummary: memoryResult.summary
         )
     }
 
     private func retrieveMemoryIfNeeded(_ request: ContextCompilationRequest,
                                         scopes: Set<ContextScope>,
                                         principal: TenantContext,
-                                        now: Date,
-                                        into unique: inout [UUID: ContextItem]) async throws -> MemoryRetrievalSummary {
-        guard let memoryQuery = request.memoryQuery else { return .none }
+                                        now: Date) async throws -> (items: [ContextItem], summary: MemoryRetrievalSummary) {
+        guard let memoryQuery = request.memoryQuery else { return ([], .none) }
 
         // If the caller requested specific keys and excluded the reserved memory
         // key, avoid a memory lookup entirely rather than retrieving data that the
         // compiler is guaranteed to discard.
         if let requestedKeys = request.requestedKeys,
            !requestedKeys.contains("memory") {
-            return MemoryRetrievalSummary(
+            return ([], MemoryRetrievalSummary(
                 requested: true,
                 retrieved: 0,
                 acceptedForRequestedScopes: 0,
                 failed: false
-            )
+            ))
         }
 
         guard let memoryRetriever else {
-            return MemoryRetrievalSummary(
+            return ([], MemoryRetrievalSummary(
                 requested: true,
                 retrieved: 0,
                 acceptedForRequestedScopes: 0,
                 failed: true
-            )
+            ))
         }
 
         do {
@@ -303,19 +307,12 @@ public struct ContextCompiler: Sendable {
                 accepted.append(item)
             }
 
-            // Existing Context Service state wins UUID collisions. A retrieval
-            // adapter can add relevant memory but cannot overwrite a stored item
-            // with a different trust/source classification.
-            for item in accepted where unique[item.id] == nil {
-                unique[item.id] = item
-            }
-
-            return MemoryRetrievalSummary(
+            return (accepted, MemoryRetrievalSummary(
                 requested: true,
                 retrieved: retrieved.count,
                 acceptedForRequestedScopes: accepted.count,
                 failed: false
-            )
+            ))
         } catch is CancellationError {
             throw CancellationError()
         } catch ContextAccessError.principalMismatch {
@@ -326,12 +323,12 @@ public struct ContextCompiler: Sendable {
             // Personalization is optional. Any provider/storage/validation failure
             // degrades to no live memory rather than widening scope, changing
             // identity, or altering authorization behavior.
-            return MemoryRetrievalSummary(
+            return ([], MemoryRetrievalSummary(
                 requested: true,
                 retrieved: 0,
                 acceptedForRequestedScopes: 0,
                 failed: true
-            )
+            ))
         }
     }
 
