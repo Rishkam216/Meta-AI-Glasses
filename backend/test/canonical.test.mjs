@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { MemoryBackend } from '../src/memory.mjs';
 import { SessionIssuer } from '../src/sessions.mjs';
-import { createTestDatabase, asSession } from './support.mjs';
+import { createTestDatabase, asSession, issueTestSession } from './support.mjs';
 
 let db, issuer, api, identities, tokens;
 before(async () => {
@@ -18,7 +18,7 @@ beforeEach(async () => {
     {tenantID:randomUUID(),userID:randomUUID(),accountID:null}
   ];
   tokens=[];
-  for(const identity of identities) tokens.push((await issuer.issue(identity)).token);
+  for(const identity of identities) tokens.push((await issueTestSession(db,identity)).token);
 });
 const run=(who,operation,input={}) => api.execute('Bearer '+tokens[who],{operation,input});
 const code=(expected) => e => e.code===expected;
