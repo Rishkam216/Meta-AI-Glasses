@@ -39,16 +39,22 @@ export class PostgresTransactions {
   }
 }
 
-export function runtimeDatabase(connectionString) {
+function databaseForRole(connectionString, role, applicationName) {
   const url = new URL(connectionString);
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.search || url.hash)
     throw new Error('invalid_database_url');
   const local = ['localhost','127.0.0.1','[::1]'].includes(url.hostname);
-  // Query-string overrides are refused. Non-loopback databases always require
-  // TLS with certificate verification. Use a supplied Pool for a custom CA.
-  const pool = new pg.Pool({ connectionString, max: 8, connectionTimeoutMillis: 5000,
-    idleTimeoutMillis: 10000, application_name: 'agent-memory-runtime',
+  const pool = new pg.Pool({ connectionString, max: role === 'agent_auth' ? 4 : 8, connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 10000, application_name: applicationName,
     ssl: local ? false : { rejectUnauthorized: true } });
   pool.on('error', () => console.error('database_idle_connection_failed'));
-  return { database: new PostgresTransactions(pool), close: () => pool.end() };
+  return { database: new PostgresTransactions(pool, role), close: () => pool.end() };
+}
+
+export function runtimeDatabase(connectionString) {
+  return databaseForRole(connectionString, 'agent_runtime', 'agent-memory-runtime');
+}
+
+export function authDatabase(connectionString) {
+  return databaseForRole(connectionString, 'agent_auth', 'agent-auth-service');
 }
