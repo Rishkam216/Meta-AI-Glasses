@@ -86,7 +86,7 @@ private func principal() -> TenantContext {
     TenantContext(tenantID: UUID(), userID: UUID())
 }
 
-@Test func realtimeTurnRoutesToolThroughOrchestratorAndReturnsResult() async throws {
+@Test func realtimeTurnRoutesSemanticCapabilityThroughOrchestratorAndReturnsResult() async throws {
     let recorder = RealtimeDeviceRecorder()
     let device = RealtimeTestDevice(
         identity: DeviceIdentity(displayName: "Local Mac", platform: "macOS"),
@@ -102,7 +102,7 @@ private func principal() -> TenantContext {
     let turn = try RealtimeTurnRequest(text: "What app am I using?")
     let intent = try RealtimeToolIntent(
         turnID: turn.id,
-        tool: "ui.get_frontmost_app"
+        tool: "computer.inspect"
     )
     let session = FakeRealtimeSession(events: [
         .toolIntent(intent),
@@ -114,9 +114,11 @@ private func principal() -> TenantContext {
 
     #expect(result.assistantText == ["You are using the local Mac app."])
     #expect(result.toolResults.count == 1)
+    #expect(result.toolResults[0].tool == "computer.inspect")
     #expect(result.toolResults[0].status == "success")
     #expect(result.toolResults[0].data == .string("Local Mac"))
     #expect(await recorder.requests.count == 1)
+    #expect(await recorder.requests[0].tool == "ui.get_frontmost_app")
 
     let sent = await session.sentEvents()
     #expect(sent.count == 3)
@@ -126,6 +128,7 @@ private func principal() -> TenantContext {
     }
     #expect(contextEvent.turnID == turn.id)
     #expect(contextEvent.context.consumer == .realtime)
+    #expect(contextEvent.capabilities.map(\.name) == ["computer.inspect"])
     guard case .userText(let userEvent) = sent[1] else {
         Issue.record("Second event must be user text")
         return
@@ -136,13 +139,14 @@ private func principal() -> TenantContext {
         return
     }
     #expect(toolResult.sourceEventID == intent.eventID)
+    #expect(toolResult.tool == "computer.inspect")
 }
 
 @Test func duplicateRealtimeToolEventResendsResultWithoutReexecution() async throws {
     let recorder = RealtimeDeviceRecorder()
     let device = RealtimeTestDevice(
         identity: DeviceIdentity(displayName: "Mac", platform: "macOS"),
-        tool: "ui.inspect",
+        tool: "ui.get_frontmost_app",
         recorder: recorder
     )
     let coordinator = try await makeRealtimeCoordinator(devices: [device])
@@ -152,7 +156,7 @@ private func principal() -> TenantContext {
     )
     let turn = try RealtimeTurnRequest(text: "Inspect")
     let eventID = UUID()
-    let intent = try RealtimeToolIntent(eventID: eventID, turnID: turn.id, tool: "ui.inspect")
+    let intent = try RealtimeToolIntent(eventID: eventID, turnID: turn.id, tool: "computer.inspect")
     let session = FakeRealtimeSession(events: [
         .toolIntent(intent),
         .toolIntent(intent),
@@ -174,7 +178,7 @@ private func principal() -> TenantContext {
     let recorder = RealtimeDeviceRecorder()
     let device = RealtimeTestDevice(
         identity: DeviceIdentity(displayName: "Mac", platform: "macOS"),
-        tool: "ui.inspect",
+        tool: "ui.get_frontmost_app",
         recorder: recorder
     )
     let coordinator = try await makeRealtimeCoordinator(devices: [device])
@@ -184,11 +188,11 @@ private func principal() -> TenantContext {
     )
     let turn = try RealtimeTurnRequest(text: "Inspect")
     let eventID = UUID()
-    let first = try RealtimeToolIntent(eventID: eventID, turnID: turn.id, tool: "ui.inspect")
+    let first = try RealtimeToolIntent(eventID: eventID, turnID: turn.id, tool: "computer.inspect")
     let changed = try RealtimeToolIntent(
         eventID: eventID,
         turnID: turn.id,
-        tool: "ui.inspect",
+        tool: "computer.inspect",
         arguments: .object(["changed": .bool(true)])
     )
     let session = FakeRealtimeSession(events: [.toolIntent(first), .toolIntent(changed)])
@@ -204,12 +208,12 @@ private func principal() -> TenantContext {
     let secondRecorder = RealtimeDeviceRecorder()
     let first = RealtimeTestDevice(
         identity: DeviceIdentity(displayName: "First", platform: "macOS"),
-        tool: "ui.inspect",
+        tool: "ui.get_frontmost_app",
         recorder: firstRecorder
     )
     let second = RealtimeTestDevice(
         identity: DeviceIdentity(displayName: "Second", platform: "macOS"),
-        tool: "ui.inspect",
+        tool: "ui.get_frontmost_app",
         recorder: secondRecorder
     )
     let coordinator = try await makeRealtimeCoordinator(devices: [first, second])
@@ -221,7 +225,7 @@ private func principal() -> TenantContext {
         text: "Inspect the second Mac",
         explicitDeviceID: second.identity.id
     )
-    let intent = try RealtimeToolIntent(turnID: turn.id, tool: "ui.inspect")
+    let intent = try RealtimeToolIntent(turnID: turn.id, tool: "computer.inspect")
     let session = FakeRealtimeSession(events: [
         .toolIntent(intent),
         .turnCompleted(RealtimeTurnCompleted(turnID: turn.id))
@@ -233,11 +237,11 @@ private func principal() -> TenantContext {
     #expect(await secondRecorder.requests.count == 1)
 }
 
-@Test func unavailableProviderToolReturnsSanitizedToolFailureAndTurnContinues() async throws {
+@Test func unavailableProviderCapabilityReturnsSanitizedFailureAndTurnContinues() async throws {
     let recorder = RealtimeDeviceRecorder()
     let device = RealtimeTestDevice(
         identity: DeviceIdentity(displayName: "Mac", platform: "macOS"),
-        tool: "ui.inspect",
+        tool: "ui.get_frontmost_app",
         recorder: recorder
     )
     let coordinator = try await makeRealtimeCoordinator(devices: [device])
@@ -257,8 +261,37 @@ private func principal() -> TenantContext {
 
     #expect(result.toolResults.count == 1)
     #expect(result.toolResults[0].status == "error")
-    #expect(result.toolResults[0].error?.code == .unavailable)
+    #expect(result.toolResults[0].error?.code == .unknownTool)
     #expect(result.assistantText == ["That capability is unavailable."])
+    #expect(await recorder.requests.isEmpty)
+}
+
+@Test func unadvertisedSemanticCapabilityFailsBeforeExecutor() async throws {
+    let recorder = RealtimeDeviceRecorder()
+    let device = RealtimeTestDevice(
+        identity: DeviceIdentity(displayName: "Read-only Mac", platform: "macOS"),
+        tool: "ui.get_frontmost_app",
+        recorder: recorder
+    )
+    let coordinator = try await makeRealtimeCoordinator(devices: [device])
+    let invocation = AgentInvocationContext(
+        principal: principal(),
+        session: AgentSession(activeDeviceID: device.identity.id)
+    )
+    let turn = try RealtimeTurnRequest(text: "Open Safari")
+    let intent = try RealtimeToolIntent(
+        turnID: turn.id,
+        tool: "computer.open_app",
+        arguments: .object(["application_id": .string("com.apple.Safari")])
+    )
+    let session = FakeRealtimeSession(events: [
+        .toolIntent(intent),
+        .turnCompleted(RealtimeTurnCompleted(turnID: turn.id))
+    ])
+
+    let result = try await coordinator.runTurn(turn, in: invocation, using: session)
+
+    #expect(result.toolResults[0].error?.code == .unknownTool)
     #expect(await recorder.requests.isEmpty)
 }
 
@@ -266,7 +299,7 @@ private func principal() -> TenantContext {
     let recorder = RealtimeDeviceRecorder()
     let device = RealtimeTestDevice(
         identity: DeviceIdentity(displayName: "Mac", platform: "macOS"),
-        tool: "ui.inspect",
+        tool: "ui.get_frontmost_app",
         recorder: recorder
     )
     let coordinator = try await makeRealtimeCoordinator(devices: [device])
