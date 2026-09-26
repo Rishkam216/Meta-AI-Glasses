@@ -5,11 +5,11 @@ Status: **Design locked. Implementation is active. Follow this document unless a
 Originally finalized: 2026-09-23  
 Current implementation checkpoint: **2026-09-26**
 
-This document is the implementation checklist and source of truth for the Personal Agent / Glasses Agent architecture.
+This document is the master implementation checklist and source of truth for the Personal Agent / Glasses Agent architecture.
 
-Do **not** mark an item `[x]` because a type, interface, placeholder, mock, or partial path exists. Mark an item complete only when the intended behavior is implemented, integrated, and covered by tests appropriate to the layer.
+Do **not** mark an item `[x]` because a type, interface, mock, placeholder, or partial path exists. Mark an item complete only when the intended behavior is implemented, integrated, and covered by tests appropriate to the layer.
 
-The purpose of this document is to prevent shallow implementations that technically satisfy a name while missing the intended product behavior, isolation, migration, security, or recovery guarantees.
+The product is a personal agent platform. The agent is the product; models, interfaces, devices, memory providers, and identity providers are replaceable components around it.
 
 ---
 
@@ -17,24 +17,20 @@ The purpose of this document is to prevent shallow implementations that technica
 
 ## Current `main`
 
-The authenticated canonical-memory foundation is merged to `main`.
+Latest merged milestone:
 
-Latest merged authentication milestone:
+- PR #16: **Integrate canonical memory into context compilation**.
+- Merged `main` commit: `9474e362eab56cd77135eef540f8e1b537d41d3a`.
+- Validated feature head: `e93f756daa4d5d71556849718e34e0b7748937af`.
 
-- PR #15: **Add provider-neutral Supabase authentication foundation**.
-- Merged `main` commit: `27d6d24f845cfc47dd22a2d33d7e8b6bc96b6eb4`.
-- Authentication foundation head validated before merge: `0f16a872b29e9d14d4e095d9ea9087489097ed98`.
+Immediately preceding merged milestones:
 
-The immediately preceding canonical-memory milestone is also on `main`:
-
+- PR #15: provider-neutral Supabase authentication foundation.
 - PR #14: PostgreSQL canonical Memory Service bridge.
-- Swift `MemoryService` / `MemoryServiceLedger` remains the semantic authority for canonical memory lifecycle.
-- PostgreSQL provides durable authenticated persistence, FORCE RLS, exact-principal isolation, compare-and-swap revisions, and rejection of foreign embedded identities.
-- macOS has a bounded authenticated HTTP snapshot transport.
 
-## Post-merge validation state
+## Post-merge validation
 
-The exact merged `main` authentication commit was validated after merge by all repository CI lanes:
+The exact merged `main` commit for PR #16 is green on all repository CI lanes:
 
 - [x] Backend isolation — embedded PostgreSQL.
 - [x] Backend isolation — native PostgreSQL.
@@ -43,11 +39,11 @@ The exact merged `main` authentication commit was validated after merge by all r
 - [x] macOS AgentCore/MacRuntime compile and tests.
 - [x] Native macOS `.app` bundle build and verification.
 
-The earlier GitHub Actions billing/runner failure notes are historical and no longer describe the current validation state.
+Historical GitHub Actions billing/runner failures no longer describe the current validation state.
 
-## Authentication architecture now implemented
+## Authentication foundation
 
-External authentication is provider-neutral at the agent boundary. Supabase Auth is the initial provider adapter, not the canonical identity system.
+External authentication is provider-neutral. Supabase Auth is the initial verifier adapter, not the canonical identity system.
 
 ```text
 Supabase Auth
@@ -56,44 +52,43 @@ Supabase Auth
     ↓
 Isolated Agent Auth Service
     ↓
-Our stable tenant_id / user_id
+Stable internal tenant_id / user_id
     ↓
-Our opaque short-lived agent session
+Opaque short-lived agent session
     ↓
 Memory / Context / Jobs / Devices / Approvals
 ```
 
-Implemented guarantees:
+Implemented:
 
-- [x] Private external-identity mapping `(provider, issuer, subject) -> internal principal`.
-- [x] Stable internal tenant/user identity independent of Supabase identifiers.
-- [x] Concurrent first-login serialization so one external identity resolves to one internal principal.
+- [x] External identity mapping `(provider, issuer, subject) -> internal principal`.
+- [x] Stable internal tenant/user identity independent of Supabase IDs.
+- [x] Concurrent first-login serialization.
 - [x] Production auth role cannot choose arbitrary internal principal IDs.
-- [x] `/v1/auth/exchange` verifies the external access token and mints our opaque session.
+- [x] `/v1/auth/exchange` verifies an external token and mints our opaque session.
 - [x] `/v1/auth/logout` revokes our opaque session.
-- [x] Downstream memory APIs consume our opaque agent session, not a Supabase JWT.
-- [x] macOS stores only our opaque agent session in Keychain.
-- [x] The Supabase access token is not persisted by the Mac auth-exchange layer.
-- [x] Runtime/writer database roles cannot invoke external session issuance.
-- [x] Repeated-login, concurrent-login, different-user isolation, revoked-session, HTTP exchange/logout and privilege-regression tests.
+- [x] Downstream memory APIs consume our opaque session, not Supabase JWTs.
+- [x] macOS stores our opaque session in Keychain.
+- [x] External provider access token is not persisted by the Mac exchange layer.
+- [x] Runtime/writer DB roles cannot invoke session issuance.
+- [x] Repeated-login, concurrent-login, isolation, revocation, HTTP exchange/logout, and privilege-regression tests.
 
-Explicitly not complete:
+Still open:
 
 - [ ] Production Supabase project configuration.
-- [ ] Live end-to-end Supabase login against production configuration.
-- [ ] Consumer email/password login UI.
+- [ ] Live end-to-end Supabase login.
+- [ ] Consumer login/signup UI.
 - [ ] Google/Apple login UI.
-- [ ] Password recovery UX.
+- [ ] Password recovery.
 - [ ] MFA/passkeys.
-- [ ] Account/provider linking UX and policy.
-- [ ] Refresh-token lifecycle/session-management UI.
+- [ ] Account/provider linking UX.
 - [ ] Production reverse-proxy/rate-limit deployment.
 
-Authentication details live in `docs/AUTHENTICATION.md`.
+Details: `docs/AUTHENTICATION.md`.
 
-## Canonical memory persistence now implemented
+## Canonical memory persistence
 
-The provider is not the source of truth. Canonical memory is owned by our provider-independent Swift memory contract and persisted in infrastructure we control.
+The provider is not the source of truth.
 
 ```text
 MemoryService
@@ -101,9 +96,9 @@ MemoryService
 RemoteMemoryServiceLedger
     ↓
 MemoryLedgerState
-    ↓ validated PortableMemoryExport v3
+    ↓ PortableMemoryExport v3
 CanonicalMemorySnapshotStore
-    ↓ compare-and-swap
+    ↓ CAS
 HTTPMemorySnapshotStore
     ↓ authenticated request
 PostgreSQL
@@ -111,139 +106,71 @@ PostgreSQL
 agent_canonical.snapshots + FORCE RLS
 ```
 
-Implemented guarantees:
-
-- [x] Stable canonical memory IDs.
-- [x] Source and derived provenance.
-- [x] Supersession/history.
-- [x] Deletion families and persistent tombstones.
-- [x] Provider-ID mappings retained in canonical state.
-- [x] Provider synchronization inventory and revision-fenced work.
-- [x] Portable v3 canonical snapshot/export.
-- [x] PostgreSQL durable persistence of complete canonical state.
-- [x] FORCE RLS exact-principal database isolation.
-- [x] Embedded foreign tenant/user/account identity rejection.
-- [x] CAS concurrency protection and bounded conflict retry.
-- [x] Restart persistence and deletion persistence tests.
-- [x] Atomic canonical-memory + provider-work persistence.
-- [x] Authenticated macOS transport connected to Keychain-backed agent sessions.
-
-Canonical bridge details live in `docs/POSTGRES_MEMORY_BRIDGE.md`.
-
-## Supermemory state
-
-Supermemory remains a replaceable memory processor/index candidate, not the source of truth.
-
 Implemented:
 
-- [x] Provider-neutral `MemoryProvider` contract.
-- [x] Provider-neutral `MemoryService`.
-- [x] Read-only Supermemory search/transport foundation.
-- [x] Explicit enable/capability gates.
-- [x] Namespace/container/scope validation on the adapter boundary.
-- [x] Durable revision-fenced mutation coordinator and recovery journal against a lifecycle-contract driver.
-- [x] Permanent deletion/revision fences preventing stale local replay/resurrection.
-- [x] Opt-in bounded live canary harness.
-- [x] Offline canary-harness tests.
+- [x] Stable canonical IDs.
+- [x] Source + derived provenance.
+- [x] Supersession/history.
+- [x] Deletion families and tombstones.
+- [x] Provider-ID mappings.
+- [x] Provider synchronization inventory/revision-fenced work.
+- [x] Portable v3 snapshot/export.
+- [x] PostgreSQL durable canonical persistence.
+- [x] FORCE RLS exact-principal isolation.
+- [x] Embedded foreign identity rejection.
+- [x] CAS concurrency and bounded retry.
+- [x] Restart/deletion persistence tests.
+- [x] Authenticated macOS snapshot transport using Keychain session.
 
-Still not claimed:
+Details: `docs/POSTGRES_MEMORY_BRIDGE.md`.
 
-- [ ] Successful authenticated live vendor canary from a network that can reach the vendor.
-- [ ] Proven Supermemory delayed-processing settlement semantics.
-- [ ] Proven complete vendor deletion of all derived/replicated copies.
-- [ ] Production Supermemory mutations.
+## Memory → Context Compiler milestone — COMPLETE
 
-A previously supplied chat credential must not be reused as a production secret. Live testing remains bounded and must not burn API credit unnecessarily.
+Merged through PR #16.
 
-## Immediate next milestone: Memory → Context Compiler
-
-This is the active milestone on branch `core/memory-context-integration`.
-
-The goal is **not** merely to add another interface. The goal is to make long-term memory an actual, tenant-safe, selective input to the existing Context Service / Context Compiler / orchestrator path without allowing memory to become instruction or authority.
-
-Target flow:
+Target path now exists:
 
 ```text
 Authenticated Agent Session
         ↓
-Backend-derived TenantContext
+TenantContext
         ↓
 Agent Orchestrator
-        ↓
-Memory retrieval request
-        ↓
-Memory Service
-        ↓
-Canonical active memories / optional provider-backed ranking
-        ↓
-Memory-to-Context adapter
-        ↓
-ContextItem(trust = memory, provenance preserved)
-        ↓
-Context Service
         ↓
 Context Compiler
         ↓
-Role-appropriate model context
+Selective MemoryContextQuery
+        ↓
+Memory Service
+        ↓
+Canonical active memories
+        ↓
+ContextItem(trust = memory, provenance preserved)
+        ↓
+Role-appropriate compiled model context
 ```
 
-### Required implementation behavior
+Completed guarantees:
 
-- [ ] Add a provider-neutral memory-retrieval boundary consumable by the context/orchestrator layer.
-- [ ] Require exact `TenantContext` on every memory retrieval path.
-- [ ] The model may supply semantic query/task information, but never authoritative tenant/user/account identity.
-- [ ] Retrieve only active canonical memories; deleted and superseded memories must not be injected.
-- [ ] Respect memory scope before candidate results are exposed to the compiler.
-- [ ] Preserve canonical memory ID, source/derived provenance, trust classification and timestamps in the context representation.
-- [ ] Convert memory into context with trust/source classification `memory`; memory is data, never an instruction.
-- [ ] Deduplicate canonical memories and cap result count/size before context compilation.
-- [ ] Make memory retrieval opt-in/selective according to the target model/context policy; do not inject all memory into every call.
-- [ ] Bounded/Jev-style decision context must continue to exclude memory unless an explicit bounded policy allows the exact memory fields required for that decision.
-- [ ] Reasoning/realtime context policies may receive relevant memories only within their configured budgets.
-- [ ] Preserve Context Compiler trust labels after memory injection.
-- [ ] Orchestrator must consume memory through the Memory Service boundary, never by calling Supermemory directly.
-- [ ] Memory retrieval failure must fail safely: absence of memory may reduce personalization, but must not bypass authorization or change tenant identity.
-- [ ] Deletion/tombstone state must win over stale provider results or cached references.
-- [ ] Add deterministic cross-tenant canaries through the complete Memory → Context Compiler path.
-- [ ] Add tests proving another principal's canonical memory cannot enter compiled context even with adversarial query text, provider references, or duplicate canonical IDs.
-- [ ] Add tests proving memory cannot grant approval, downgrade risk, select another tenant, or become a user instruction.
-- [ ] Add tests for superseded/deleted memory exclusion, scope filtering, ordering/deduplication, and bounded result size.
-- [ ] Integrate retrieval into the existing orchestrator path used for model-context compilation rather than leaving the adapter unused.
-- [ ] Update this document and dedicated implementation documentation with exact completed behavior and validation before merge.
-
-### Definition of done for this milestone
-
-Do **not** mark Memory → Context complete merely because a `MemoryContextRetriever` type exists.
-
-The milestone is complete only when:
-
-1. an authenticated principal can trigger selective long-term-memory retrieval through the orchestrator/context path;
-2. canonical memory is resolved under the exact principal before compilation;
-3. compiled context contains only allowed, active, scope-matching memories;
-4. provenance/trust labels survive compilation;
-5. bounded-provider policies remain minimal and fail closed;
-6. deletion/supersession prevents stale memory injection;
-7. cross-tenant canary tests exercise the end-to-end retrieval-to-compiler path;
-8. portable Swift tests pass;
-9. native macOS tests/app build pass if native code changes;
-10. backend/native PostgreSQL tests pass if backend code changes;
-11. the exact branch head passes required GitHub Actions before merge.
-
-After this milestone, the product path returns to:
-
-```text
-Realtime AI
-    ↓
-Agent Orchestrator
-    ↓
-Context Compiler + Memory
-    ↓
-Device Router
-    ↓
-Mac Executor
-```
-
-The next user-visible objective remains conversational Mac control. Windows work stays deferred for now.
+- [x] Provider-neutral memory retrieval boundary.
+- [x] Exact `TenantContext` required on memory retrieval.
+- [x] Model-facing query cannot choose authoritative tenant/user/account identity.
+- [x] Only active canonical memories are eligible.
+- [x] Deleted/superseded memories are excluded.
+- [x] Project/workspace/user scope is enforced before exposure to compiler.
+- [x] Canonical ID/provenance/timestamps survive conversion.
+- [x] Memory is classified as `memory`, never as instruction/authority.
+- [x] Result count and byte budgets are enforced.
+- [x] Memory retrieval is explicit opt-in.
+- [x] Bounded/Jev-style decisions remain memory-free.
+- [x] Reasoning/realtime compilation can receive selected memory within policy budgets.
+- [x] Context Compiler trust labels are preserved.
+- [x] Orchestrator uses Memory Service boundary, never Supermemory directly.
+- [x] Retrieval failure degrades to no-memory context without changing identity/authorization.
+- [x] Cross-tenant and adversarial memory tests are present.
+- [x] Prompt-injection-shaped memory remains untrusted data.
+- [x] Orchestrator exposes the authenticated model-context compilation boundary.
+- [x] Exact feature head and merged `main` passed all required CI.
 
 ---
 
@@ -251,135 +178,55 @@ The next user-visible objective remains conversational Mac control. Windows work
 
 The product is a **personal agent platform**, not a Meta-glasses-only application.
 
-The agent is the product. Interfaces and devices are adapters around that agent.
-
-A user should have one internal agent identity that can eventually be accessed from multiple authorized interfaces and can operate multiple authorized devices and cloud services.
-
-Intended interfaces include:
-
-- iOS app;
-- Android app;
-- macOS app;
-- Windows app;
-- Meta glasses through a phone companion when the platform permits it;
-- future web interface if useful;
-- future interfaces such as earbuds, other glasses, or conversational surfaces.
-
-The same account should preserve:
-
-- agent identity;
-- session continuity;
-- long-running jobs;
-- device inventory;
-- approvals;
-- context;
-- long-term memory;
-- connected-service context when relevant.
-
-A task started on one interface should eventually be visible and queryable from another authorized interface.
-
-## Required product modes
-
-### Phone only
-
-A user without glasses and without a connected computer must still have a useful product.
-
-The mobile app should support, where authorized:
-
-- text chat;
-- realtime voice;
-- camera input;
-- connected-service actions and retrieval;
-- cloud research;
-- cloud browser / cloud work in future;
-- file analysis;
-- long-running jobs;
-- notifications;
-- approvals;
-- task/job history.
-
-The mobile app must not be treated only as a companion to glasses.
-
-### Phone + computer
-
-The mobile app acts as a remote conversational control surface for connected computers.
+Long-term shape:
 
 ```text
-Phone
-  ↓
-Agent Session
-  ↓
-Orchestrator
-  ↓
-Device Router
-  ↓
-Mac / Windows Executor
+Meta Glasses / Phone / Desktop / Future Interfaces
+                    ↓
+             Realtime Session
+                    ↓
+             Agent Orchestrator
+                    ↓
+          Model + Context Routing
+                    ↓
+               Tool Router
+                    ↓
+             Device Executors
+                    ↓
+      Mac / Windows / Linux / Android
 ```
 
-The phone should show progress, job state, results and approvals when necessary.
+One internal agent identity should span authorized interfaces and devices.
 
-### Direct desktop use
+Required future modes:
 
-The Mac/Windows app is both:
+- phone only;
+- phone + computer;
+- direct desktop;
+- glasses through a phone companion when platform APIs permit it.
 
-1. a first-class agent interface; and
-2. a local device executor.
-
-A user sitting at their computer should not need a phone or glasses.
-
-The desktop app should eventually support text, voice, command/overlay UI, job status, approvals, notifications, local context awareness and local execution.
-
-When a request originates on a desktop, that desktop may become the default active device when the command is contextual and no explicit device was named.
-
-### Glasses
-
-Meta glasses are an optional hands-free interface, not a separate agent product.
-
-```text
-Meta Glasses
-    ↓
-Phone Companion
-    ↓
-Same Agent Session
-    ↓
-Same Orchestrator
-    ↓
-Same Devices / Cloud Services
-```
-
-## Implementation checklist
+Checklist:
 
 - [ ] First-class interface-adapter contract.
 - [ ] One agent identity proven across at least two real interfaces.
 - [ ] Cross-interface session continuation.
 - [ ] Cross-interface job visibility.
 - [ ] Interface-origin metadata on every user request.
-- [ ] Explicit-device instructions override defaults end-to-end.
+- [ ] Explicit-device instruction override end-to-end.
 - [ ] Trusted active-device resolution.
-- [x] Provider-neutral external-auth boundary and stable internal identity mapping foundation.
-- [x] Opaque internal agent-session issuance/revocation foundation.
+- [x] Provider-neutral external-auth foundation.
+- [x] Opaque internal agent-session foundation.
 
 ---
 
 # 2. Interface layer vs device executor layer
 
-An **interface** is where the user communicates with the agent.
-
+An **interface** is where the user communicates with the agent.  
 A **device executor** is where capabilities execute.
 
-The same app may implement both roles.
+The desktop app eventually implements both roles.
 
-## Mobile app
-
-The mobile app should primarily act as interface client, realtime voice/camera surface, approval/notification surface, job viewer, device selector and a limited mobile executor only where platform APIs permit it.
-
-Do not architect the product around arbitrary autonomous control of every iOS or Android app.
-
-## Desktop app
-
-The desktop app should provide an interface role and an executor role.
-
-Potential executor capabilities include:
+Potential Mac executor tools:
 
 ```text
 app.open
@@ -395,15 +242,15 @@ shell.run
 screen.capture
 ```
 
-All remain subject to permissions, approval/risk handling and native OS restrictions.
+All execution remains subject to OS permissions, deterministic policy, approvals, risk handling, device/session identity, and audit logging.
 
-## Implementation checklist
+Checklist:
 
 - [ ] Mobile interface client.
 - [ ] Desktop conversational interface client.
 - [ ] Mobile executor boundary.
 - [x] Native macOS executor/runtime boundary foundation.
-- [ ] Windows executor boundary — explicitly deferred for current phase.
+- [ ] Windows executor — deferred.
 - [ ] Future glasses companion boundary.
 
 ---
@@ -414,50 +261,248 @@ Central rule:
 
 > **The orchestrator is the agent. Models are components used by the orchestrator.**
 
-The realtime model must not become the whole agent. The device runtime must not know which model produced a request.
+The realtime model is not the authority for permissions, approvals, device identity, tenant identity, tool authorization, or OS-native execution.
 
-## Realtime model responsibilities
+Realtime model responsibilities:
 
-The realtime model should primarily handle speech-to-speech interaction, turn-taking, immediate intent interpretation, clarifying questions, conversational continuity, presentation of results and structured handoff of user goals.
+- speech/text interaction;
+- turn-taking;
+- intent interpretation;
+- clarification;
+- conversational continuity;
+- presentation of results;
+- structured handoff of user goals/tool intents.
 
-It is not the authority for permissions, approvals, risk enforcement, device identity, tool authorization, OS-native execution or cross-tenant access.
+Orchestrator responsibilities:
 
-## Orchestrator responsibilities
-
-The orchestrator owns:
-
-- agent session state;
-- task state;
+- authenticated invocation identity;
+- model-context compilation;
+- session/task state;
 - device resolution;
 - capability selection;
+- tool routing;
 - workflow progression;
-- decision escalation;
 - approval integration;
-- long-running job delegation;
+- decision escalation;
 - stopping conditions;
 - correlation IDs;
 - observability;
-- Context Service interaction;
-- Memory Service interaction;
+- Context Service;
+- Memory Service;
 - model/provider routing.
 
-## Existing implementation foundation
+Existing foundation:
 
-- [x] Provider-neutral decision-provider abstraction.
+- [x] Provider-neutral decision provider.
 - [x] Deterministic-rule-first decision engine.
 - [x] Reasoning fallback abstraction.
-- [x] Provider-neutral agent-orchestrator foundation.
-- [x] Capability-based device routing foundation.
-- [x] Exact single-use approval foundation.
-- [x] Context-compiler integration foundation for bounded decisions.
-- [ ] Long-term memory retrieval integrated into compiled orchestrator context — active milestone.
-- [ ] Realtime model adapter integrated with orchestrator.
-
-These foundations are not completion of the product architecture.
+- [x] Provider-neutral AgentOrchestrator.
+- [x] Capability-based device routing.
+- [x] Exact single-use approvals.
+- [x] Context Compiler integration.
+- [x] Selective Memory → Context integration.
+- [ ] Realtime session/provider adapter integrated with orchestrator — **active milestone**.
+- [ ] Real Mac executor capabilities invoked through orchestrator — **active milestone**.
 
 ---
 
-# 4. Decision hierarchy and Jev
+# 4. Immediate active milestone: Realtime AI → Orchestrator → Mac Executor
+
+Active branch:
+
+`core/realtime-orchestrator-mac-control`
+
+This milestone is the first user-visible control loop. It must not bypass the architecture already built.
+
+Target flow:
+
+```text
+Mac conversational interface
+        ↓
+RealtimeSession
+        ↓
+RealtimeModelProvider
+        ↓ structured user/model events
+Agent Orchestrator
+        ↓
+Context Compiler + selective Memory
+        ↓
+Agent-level capability / tool intent
+        ↓
+Device Router
+        ↓
+Policy + approval boundary
+        ↓
+Mac Executor
+        ↓
+typed tool result
+        ↓
+Agent Orchestrator
+        ↓
+RealtimeSession
+        ↓
+response to user
+```
+
+## Architecture decisions
+
+### Provider neutrality
+
+Realtime transport must sit behind a provider-neutral contract.
+
+Initial provider may be OpenAI Realtime, but:
+
+- AgentCore must not import provider-specific event types.
+- Orchestrator must not know websocket/event names from a vendor.
+- Provider-specific session/auth/audio handling stays in an adapter.
+- Future Claude/other realtime or text providers must be replaceable without changing tool/executor contracts.
+
+### Realtime model is not a direct tool executor
+
+The model may propose a structured capability/tool request. It does not call native Mac APIs itself.
+
+Every action must pass through:
+
+```text
+authenticated invocation
+→ orchestrator
+→ device routing
+→ policy/risk
+→ approval when required
+→ executor
+→ audit/result
+```
+
+### Mac-first scope
+
+Windows remains deferred. This milestone targets the local authenticated Mac runtime first.
+
+### Text/control path before voice polish
+
+The architecture must support realtime voice, but correctness of the event/session/tool loop comes before UI/voice polish. A deterministic text/event harness must be able to test the same orchestrator path without microphone/audio dependencies.
+
+### No model-supplied identity
+
+Tenant/user/account/device authority comes from trusted session/runtime state. Provider/model event payloads cannot choose another principal or silently redirect execution to an unauthorized device.
+
+### No model-supplied approval
+
+Tool intents cannot grant their own approval or lower risk. Existing approval semantics remain authoritative.
+
+## Required implementation behavior
+
+### Realtime session layer
+
+- [ ] Add provider-neutral `RealtimeSession` / `RealtimeModelProvider` contract.
+- [ ] Define typed input/output event model independent of vendor wire format.
+- [ ] Carry stable session ID, correlation/turn ID, interface origin, and authenticated invocation context.
+- [ ] Support user text input in the deterministic harness.
+- [ ] Define audio input/output event boundaries without making audio required for core tests.
+- [ ] Support assistant text/transcript events.
+- [ ] Support structured capability/tool-intent events.
+- [ ] Support structured tool-result return to provider/session.
+- [ ] Support cancellation/interruption.
+- [ ] Bound event payload sizes and reject malformed events.
+- [ ] Ensure provider adapter cannot authoritatively set tenant/user/account identity.
+
+### Orchestrator loop
+
+- [ ] Realtime requests enter through AgentOrchestrator, not directly through MacRuntime.
+- [ ] Orchestrator compiles role-appropriate context for the turn.
+- [ ] Relevant long-term memory may be selectively requested for reasoning/realtime context.
+- [ ] Bounded decision provider continues to receive minimal/memory-free context.
+- [ ] Structured model tool intent is validated against registered agent capabilities/tools.
+- [ ] Unknown/unadvertised tools fail closed.
+- [ ] Explicit device selection wins.
+- [ ] Default local-device routing uses trusted runtime state, not model claims.
+- [ ] Tool execution produces typed result/error back into the session.
+- [ ] Every turn/action carries correlation IDs through audit/result path.
+
+### Mac executor: first real capability slice
+
+Implement a small useful vertical slice rather than dozens of shallow tools.
+
+Initial read-only tools:
+
+- [ ] `ui.get_frontmost_app`.
+- [ ] `ui.get_windows` or equivalent bounded window inventory.
+- [ ] `process.list` with bounded output.
+- [ ] `file.read` with path/size policy.
+
+Initial action tools:
+
+- [ ] `app.open`.
+- [ ] `ui.click` using accessibility element targeting where possible.
+- [ ] `ui.type`.
+- [ ] `shell.run` only behind explicit policy/approval and bounded execution constraints.
+
+If an existing tool already implements part of this safely, integrate it instead of creating a parallel implementation.
+
+### Native security requirements
+
+- [ ] Accessibility permission checks remain explicit.
+- [ ] Screen-recording permission is requested only for capabilities that require it.
+- [ ] No camera/microphone permission is needed for deterministic control-loop tests.
+- [ ] Non-read actions preserve existing exact single-use approval semantics.
+- [ ] Tool arguments are immutable across approval/execution.
+- [ ] Approval cannot be replayed.
+- [ ] Shell/process execution has command/timeout/output bounds.
+- [ ] File reads are bounded and reject unsafe/unapproved scope when policy requires it.
+- [ ] Native executor errors are sanitized before being returned to model context.
+- [ ] Audit logs preserve action/result metadata without logging secrets unnecessarily.
+
+### OpenAI Realtime adapter
+
+- [ ] Add provider-specific adapter outside AgentCore.
+- [ ] Do not hard-code OpenAI into orchestrator/tool contracts.
+- [ ] Secrets come from trusted configuration/Keychain/environment boundary, never model context.
+- [ ] Adapter translates provider events into our typed realtime events.
+- [ ] Adapter translates tool results back to provider events.
+- [ ] Transport disconnect/reconnect does not duplicate committed actions.
+- [ ] Interrupted turns cannot replay already-consumed approval grants.
+- [ ] Live API testing must be explicitly bounded to avoid unnecessary credit spend.
+
+### Testing
+
+- [ ] Deterministic fake realtime provider drives a full user-turn → tool-intent → orchestrator → Mac executor/fake executor → tool-result → assistant-response loop.
+- [ ] Cross-tenant/provider event cannot change authenticated principal.
+- [ ] Model cannot execute unregistered capability.
+- [ ] Model cannot self-approve an action.
+- [ ] Model cannot change immutable arguments after approval.
+- [ ] Wrong-device/unadvertised-capability requests fail closed.
+- [ ] Duplicate provider event does not duplicate a committed action.
+- [ ] Cancellation stops pending execution where safe.
+- [ ] Context/memory trust labels survive realtime compilation.
+- [ ] Prompt-injection-shaped memory/external content cannot become approval.
+- [ ] Portable AgentCore CI passes.
+- [ ] Native macOS tests/app bundle pass.
+- [ ] Backend CI remains green if backend code is untouched; any backend changes require embedded + native PostgreSQL validation.
+
+## Definition of done
+
+Do **not** mark this milestone complete because a websocket connects or because a model can emit a function call.
+
+It is complete only when:
+
+1. a deterministic user turn enters a provider-neutral realtime session;
+2. the turn is bound to authenticated `TenantContext` and trusted interface/device state;
+3. the orchestrator compiles allowed context/memory;
+4. a structured tool intent is validated and routed through the existing policy/device boundary;
+5. at least one real native Mac read capability and one real native Mac action capability execute end-to-end;
+6. action approval semantics remain exact, single-use, and replay-safe;
+7. typed tool results return to the realtime session;
+8. duplicate/replayed provider events do not duplicate committed actions;
+9. cross-tenant/device canaries fail closed;
+10. portable tests pass;
+11. native macOS tests and app bundle pass;
+12. exact branch-head CI is green before merge;
+13. this source-of-truth and dedicated implementation doc are updated before merge.
+
+After this milestone, expand the Mac capability surface and add voice/audio UX without changing the security/orchestration boundary.
+
+---
+
+# 5. Decision hierarchy and bounded decisions
 
 Intended order:
 
@@ -468,35 +513,29 @@ Can deterministic code decide?
         ↓ no
 Is this a bounded decision among explicit options?
         ↓ yes
-Use bounded decision provider (future Jev adapter)
-        ↓ low confidence / unresolved / open-ended
+Use bounded decision provider
+        ↓ unresolved/open-ended
 Use reasoning model
 ```
 
-A bounded decision provider is not a conversational model and not a security authority.
+A bounded provider cannot approve actions, downgrade risk, grant permissions, invent tools, choose another tenant, or bypass deterministic policy.
 
-It may choose among explicit candidates, but it must not approve actions, downgrade risk, grant permissions, invent tool names, choose outside explicit options, bypass deterministic policy or become the source of tenant identity.
-
-## Implementation checklist
+Checklist:
 
 - [x] Generic decision-provider interface.
-- [x] Deterministic-rule priority.
+- [x] Deterministic priority.
 - [x] Reasoning fallback abstraction.
-- [ ] Actual Jev provider adapter.
-- [ ] Confidence/escalation tuning on real workloads.
-- [ ] Metrics comparing bounded-provider vs reasoning-provider decisions.
+- [ ] Actual Jev adapter.
+- [ ] Confidence/escalation tuning.
+- [ ] Real workload comparison metrics.
 
 ---
 
-# 5. Agent-level capabilities vs executor-level tools
+# 6. Agent-level capabilities vs executor tools
 
-Do not expose hundreds of low-level OS-specific tools directly to conversational models.
+Models should reason primarily in semantic agent-level capabilities, while native implementation details remain in device adapters.
 
-Use two layers.
-
-## Agent-level capabilities
-
-Examples:
+Agent-level examples:
 
 ```text
 computer.inspect
@@ -510,9 +549,7 @@ job.start
 job.status
 ```
 
-## Executor-level tools
-
-Examples:
+Executor examples:
 
 ```text
 ui.get_frontmost_app
@@ -524,57 +561,48 @@ app.open
 file.read
 process.list
 shell.run
+screen.capture
 ```
 
-Models should reason primarily in terms of semantic agent-level capabilities. The orchestrator translates these into executor-level actions. OS-specific implementation names remain inside device adapters.
+Checklist:
 
-## Implementation checklist
-
-- [ ] Agent-level capability schema.
-- [ ] Translation layer from semantic capability to executor steps.
-- [ ] Capability narrowing so models see only relevant capabilities.
-- [ ] No OS-specific implementation names in model-facing contracts.
+- [ ] Agent-level capability schema — active milestone begins this layer.
+- [ ] Translation from semantic capability to executor steps.
+- [ ] Capability narrowing per turn.
+- [ ] Keep OS-specific implementation names out of portable provider contracts.
 
 ---
 
-# 6. Long-running jobs
+# 7. Long-running jobs
 
 Realtime interaction must remain responsive while longer work runs independently.
 
-Examples include repository analysis, coding, debugging, builds, research, browser crawls and extended data analysis.
+Future job lifecycle:
 
 ```text
-Realtime Session
-      ↓
-Orchestrator
-   ├── immediate action path
-   └── Job Manager
-           ↓
-        Workers
+job.start
+job.status
+job.result
+job.cancel
 ```
 
-Jobs should have persistent IDs and lifecycle operations such as `job.start`, `job.status`, `job.result`, and `job.cancel`.
+Checklist:
 
-## Implementation checklist
-
-- [ ] Job model with persistent ID.
+- [ ] Persistent job IDs.
 - [ ] Start/status/result/cancel contract.
 - [ ] Cross-interface job visibility.
-- [ ] Job-to-session relationship.
-- [ ] Job-to-user/tenant ownership enforcement.
+- [ ] User/tenant ownership.
 - [ ] Cancellation semantics.
-- [ ] Bounded output/artifact references.
-- [ ] Progress events suitable for mobile/desktop notifications.
+- [ ] Bounded artifact references.
+- [ ] Progress events.
 
 ---
 
-# 7. Context is a first-class subsystem
+# 8. Context subsystem
 
-Do not treat context as one giant prompt or one giant conversation history.
+Context is not one giant prompt/history.
 
-The system may store rich context, but each model call should receive only the smallest relevant context required for its task.
-
-The Context Service is separate from long-term memory.
+Current architecture:
 
 ```text
 Interfaces / Devices
@@ -590,142 +618,37 @@ Relevant context only
 Realtime / bounded decision / reasoning / jobs
 ```
 
-## Context layers
+Implemented:
 
-### User context
-
-Long-lived user-level information such as preferred language, usual devices, recurring workflows, project aliases and preferences. Retrieve selectively.
-
-### Session context
-
-Current interaction state such as session ID, recent conversation, goal, task, pending approval, active jobs and latest relevant result.
-
-### Interface context
-
-Where the request originated: `mac_desktop`, `windows_desktop`, `ios_app`, `android_app`, `meta_glasses_via_phone`, `web`, etc. This informs defaults but never overrides explicit user instructions.
-
-### Device context
-
-Live/near-live device state such as device ID, presence, capabilities, frontmost app, focused window, active project, working directory, running jobs, selected file and browser tab.
-
-Detailed UI trees/screenshots/heavy state should be collected on demand, not continuously uploaded by default.
-
-### Task/job context
-
-Task context is structured separately from conversation and should contain compact goal/known-state/actions/next-candidates information.
-
-### Application context
-
-Prefer structured app/browser integrations, then Accessibility/UI Automation, then vision, then coordinates.
-
-### Long-term memory
-
-Persistent facts/preferences belong in Memory Service and are retrieved into context only when relevant.
-
-### Connected-service context
-
-Gmail, Calendar, Drive, GitHub, Slack and similar systems should be retrieved only when needed by the task. Never dump an entire service account into model context by default.
-
-## Implementation checklist
-
-- [x] Tenant-bound ContextItem schema.
+- [x] Tenant-bound ContextItem.
 - [x] Context Service contract.
-- [x] Tenant-partitioned in-memory Context Service.
-- [x] Durable file-backed Context Service foundation.
-- [x] Typed session/interface/device/task state contracts and validation.
-- [x] Explicit context scopes.
-- [x] Stale-context refresh coordinator foundation.
-- [ ] Product-level durable cross-interface session context.
-- [ ] Live device/application refresh adapters for the full Mac executor surface.
-- [ ] Application-context adapter contract integrated with real apps.
-- [ ] Connected-service context retrieval boundary integrated with orchestrator.
-- [ ] Long-term Memory Service retrieval integrated into Context Service/Compiler — active milestone.
-
----
-
-# 8. Context Compiler
-
-The Context Compiler builds actual model input from the larger context store.
-
-Different model types receive different context.
-
-## Realtime model should generally receive
-
-- recent conversation;
-- compact session summary;
-- current goal/task;
-- latest relevant tool result;
-- basic active-device state;
-- only the context required for a natural response.
-
-## Bounded/Jev-style provider should receive
-
-- highly structured state;
-- explicit options;
-- constraints;
-- minimal facts necessary to choose.
-
-Do not send unnecessary conversation history, private files, raw logs or broad long-term memory to a bounded decision provider.
-
-## Reasoning model may receive
-
-- current goal;
-- task history;
-- relevant file/log excerpts;
-- relevant tool results;
-- selectively retrieved memories;
-- relevant connected-service data;
-- available agent-level capabilities.
-
-## Context compression and artifacts
-
-Older history should be summarized. Large data should remain outside model context whenever possible and be represented through bounded artifact references.
-
-## Implementation checklist
-
+- [x] Tenant-partitioned in-memory service.
+- [x] Durable file-backed foundation.
+- [x] Typed session/interface/device/task state.
+- [x] Explicit scopes including project/workspace.
+- [x] Freshness metadata.
+- [x] Refresh coordinator foundation.
 - [x] Context Compiler.
-- [x] Model-specific context policies.
+- [x] Model-specific policies.
 - [x] Trust-label preservation.
-- [x] Compiler tenant-isolation tests.
-- [ ] Long-term memory retrieval/injection with trust/provenance preservation — active milestone.
+- [x] Memory retrieval/injection with scope/provenance enforcement.
+
+Still open:
+
+- [ ] Product-level durable cross-interface session context.
+- [ ] Full live Mac device/application refresh adapters.
+- [ ] Connected-service context through orchestrator.
 - [ ] Session summarization.
-- [ ] Artifact reference model.
-- [ ] Bounded artifact reads.
-- [ ] Context token/size budgeting beyond per-source caps.
+- [ ] Artifact references.
+- [ ] Broader token budgeting.
 
 ---
 
-# 9. Context freshness
+# 9. Context trust and prompt-injection boundary
 
-Context items must carry freshness metadata because live computer state becomes stale quickly.
+Context is data unless it is explicitly trusted as an instruction source.
 
-Each context item should carry source, observed time, device ID where relevant and freshness class.
-
-Suggested classes:
-
-- ephemeral — seconds/minutes;
-- session — minutes/hours;
-- project — days/months;
-- long-term — months/years until superseded.
-
-The orchestrator/compiler should refresh stale ephemeral context rather than trust it blindly.
-
-## Implementation checklist
-
-- [x] Freshness metadata on context items.
-- [x] Expiry/staleness policy.
-- [x] Refresh-coordinator/adaptor foundation with bounded refresh behavior.
-- [ ] Complete live automatic refresh coverage for real Mac application/device sources.
-
----
-
-# 10. Context trust and prompt-injection boundaries
-
-Context is not equivalent to instruction.
-
-A webpage, email, document, terminal output, memory or model-generated summary may contain adversarial instructions.
-
-Every context item must preserve a trust/source classification such as:
+Trust classes include:
 
 ```text
 user_instruction
@@ -736,24 +659,24 @@ memory
 model_generated
 ```
 
-External content and memory must never become authoritative user instructions merely because they appear in retrieved context.
+Implemented:
 
-## Implementation checklist
+- [x] Provenance/trust metadata.
+- [x] Context Compiler preserves trust.
+- [x] Bounded decisions default to curated state and exclude memory by default.
+- [x] Memory-shaped prompt injection remains `memory`, not instruction.
 
-- [x] Provenance/trust metadata on context.
-- [x] Context Compiler preserves trust labels.
-- [x] Bounded decision context defaults to curated system/tool state and makes user/memory/external/model-generated context opt-in.
-- [ ] Prompt-injection tests using webpage/email/document content across the full model path.
-- [ ] End-to-end test that external content cannot grant permissions/approvals.
-- [ ] End-to-end test that memory cannot grant permissions/approvals — active milestone coverage.
+Still required:
+
+- [ ] End-to-end webpage/email/document prompt-injection tests through a live model path.
+- [ ] Prove external content cannot grant approval.
+- [ ] Prove realtime provider events cannot grant approval.
 
 ---
 
-# 11. Long-term memory strategy
+# 10. Long-term memory strategy
 
-Do **not** build a full memory-intelligence engine from scratch initially.
-
-Use a first-class memory provider behind our own interface. Initial candidate: Supermemory. Other providers may include Zep, Mem0, future systems or a local provider.
+Use provider-neutral memory behind our own service.
 
 ```text
 Context / Orchestrator
@@ -763,268 +686,133 @@ Memory Service
 MemoryProvider
    ├── SupermemoryProvider
    ├── future provider
-   └── local/provider-independent implementations
+   └── local/provider-independent
 ```
 
-The orchestrator must never call Supermemory-specific APIs directly.
+Implemented:
 
-## Implementation checklist
-
-- [x] MemoryProvider contract.
+- [x] MemoryProvider.
 - [x] Memory Service.
-- [x] Provider-independent tests.
-- [x] Provider capability reporting.
-- [x] Supermemory read-only search/transport foundation with capability gate.
-- [x] Durable revision-fenced mutation coordination foundation.
-- [x] Bounded live-canary harness and offline harness tests.
-- [ ] Successful authenticated canary run with resolved cleanup.
-- [ ] Proven live Supermemory lifecycle guarantees for production mutation use.
-- [ ] Production Supermemory mutation activation.
-- [ ] Memory retrieval integrated into Context Compiler — active milestone.
+- [x] Portable canonical ledger.
+- [x] PostgreSQL canonical bridge.
+- [x] Provider capability gates.
+- [x] Supermemory read-only adapter foundation.
+- [x] Revision-fenced mutation coordinator.
+- [x] Live-canary harness + offline tests.
+- [x] Selective Memory → Context Compiler integration.
+
+Still open:
+
+- [ ] Successful authenticated live vendor canary from reachable network.
+- [ ] Proven vendor lifecycle/deletion guarantees.
+- [ ] Production provider mutations.
+- [ ] Provider migration pipeline/dual-write/shadow-read.
+
+A previously supplied chat credential must not be reused as a production secret.
 
 ---
 
-# 12. Our canonical Memory Ledger is the source of truth
+# 11. Tenant/user isolation
 
-The memory provider must **not** become the only place user memory exists.
+There must be **no cross-user memory or execution leakage**.
 
-Provider IDs are mappings, not canonical identity.
+Authoritative identity is derived from authenticated server/runtime state, never model output or request-body identity fields.
 
-Canonical records preserve enough portable information to recreate memory in another provider, including our memory ID, exact tenant/user/account ownership, scope, source type/reference/time, content/fact, creation/update time, supersession, confidence, provenance and future visibility/ACL fields.
+Implemented:
 
-Retain source evidence and derived memory when practical.
+- [x] TenantContext.
+- [x] Opaque session-derived identity.
+- [x] DB FORCE RLS.
+- [x] Separate auth/runtime/writer roles.
+- [x] Native PostgreSQL isolation CI.
+- [x] Remote canonical ledger exact-principal binding.
+- [x] Context-store/compiler isolation.
+- [x] Memory → Context cross-tenant canaries.
+- [x] Backend cache isolation.
 
-## Implementation checklist
+Still required:
 
-- [x] Canonical Memory Ledger contract.
-- [x] Durable local/offline ledger.
-- [x] Durable PostgreSQL-backed canonical persistence through PR #14.
-- [x] Stable canonical memory IDs.
-- [x] Source provenance.
-- [x] Derived-memory provenance.
-- [x] Supersession/history model.
-- [x] Permanent deletion tombstones.
-- [x] Provider-ID mappings durably retained in canonical state.
-- [x] Provider synchronization inventory/work retained in canonical state.
-- [x] Portable v3 export/snapshot.
-- [x] Exact-principal binding and database FORCE RLS.
-- [x] CAS conflict handling for concurrent clients.
-- [x] Native macOS authenticated canonical snapshot transport.
-- [ ] Production cloud deployment/operations for the canonical PostgreSQL service.
-
----
-
-# 13. Provider migration without memory loss
-
-Changing memory providers must not mean the user's agent forgets everything.
-
-A future migration may use:
-
-```text
-Canonical Memory Ledger
-       +
-Current Provider Export
-       ↓
-Migration Pipeline
-       ↓
-New Provider
-       ↓
-Re-index / re-embed / rebuild graph
-       ↓
-Shadow comparison
-       ↓
-Switch reads
-```
-
-Safe migration may use dual write, shadow read, then cutover while keeping canonical IDs stable.
-
-Migration tests must verify counts, important facts, history, isolation, deletion preservation, stable canonical IDs and acceptable retrieval quality.
-
-## Implementation checklist
-
-- [ ] Provider migration pipeline.
-- [ ] Dual-write provider migration mode.
-- [ ] Shadow-read comparison.
-- [x] Provider-independent portable canonical snapshot/export format.
-- [ ] Migration verification suite.
-
----
-
-# 14. Forget/delete semantics
-
-User deletion must propagate from the canonical source of truth outward.
-
-```text
-MemoryService.forget(...)
-        ↓
-Canonical Memory Ledger
-        ↓
-Active provider
-        ↓
-Indexes / caches / replicas / derived stores
-```
-
-Deleted memory must not be resurrected by migration, re-indexing, stale cache or another provider copy.
-
-## Implementation checklist
-
-- [x] Canonical forget/delete operation and deletion-family semantics.
-- [x] Local lineage/derivation cleanup and persistent tombstones.
-- [x] Restart/reinsertion tests proving deleted IDs cannot reappear locally.
-- [x] PostgreSQL canonical deletion/tombstone persistence.
-- [x] Durable provider-work deletion fencing/recovery foundation.
-- [ ] Proven production provider deletion propagation against a live provider.
-- [x] Backend lexical cache invalidation/deletion coordination.
-- [ ] Migration verification that deletions remain deleted.
-- [ ] End-to-end Memory → Context test proving deleted memory is never compiled — active milestone.
-
----
-
-# 15. Tenant and user isolation is a security boundary
-
-There must be **no cross-user memory leakage**.
-
-A request authenticated as User A must be technically unable to retrieve User B's private memory even if there is a bug in a prompt, model output, retrieval query, cache key or provider call.
-
-Never use:
-
-```text
-Search all memories
-      ↓
-Filter by user afterwards
-```
-
-Authoritative tenant/user/account identity is derived from authenticated server state, never from model output or a request body field.
-
-Isolation must exist at the canonical database, memory provider boundary, retrieval namespace/filter, cache, jobs, files/artifacts, logs, backups and analytics layers.
-
-## Implementation checklist
-
-- [x] TenantContext type/contract.
-- [x] Tenant context required by memory APIs.
-- [x] PostgreSQL FORCE RLS canonical/backend isolation.
-- [x] Opaque session-derived backend identity.
-- [x] Separate auth/runtime/writer roles and privilege tests.
-- [x] Native PostgreSQL login/concurrency CI gate.
-- [x] Complete Swift remote canonical-ledger integration.
-- [x] Provider-neutral external-auth foundation with Supabase verifier adapter.
-- [ ] Production live identity-provider configuration/enrollment.
-- [ ] Proven live provider namespace isolation for production provider reads/writes.
-- [ ] Tenant-scoped semantic/vector retrieval implementation.
-- [x] Principal/scope/query/limit-partitioned backend lexical cache.
+- [ ] Live semantic/provider-backed isolation.
 - [ ] Tenant-scoped jobs.
-- [ ] Tenant-scoped artifact service.
-- [ ] Production safe-logging policy and enforcement.
-- [ ] Backup isolation/encryption policy.
+- [ ] Tenant-scoped artifacts.
+- [ ] Production logging/backup policy.
+- [ ] Realtime/tool-event cross-tenant isolation — active milestone.
 
 ---
 
-# 16. Cross-tenant isolation tests
+# 12. Shared scopes
 
-Use deterministic canary secrets and test every supported path.
+Future explicit sharing may include user, project, workspace, device, and team scopes.
 
-Examples:
+Private remains default.
 
-```text
-User A: ALPHA-PINEAPPLE-7834
-User B: BETA-ZEBRA-9911
-```
+Checklist:
 
-Authenticated as A, every supported path for B's canary must return nothing, and vice versa.
-
-Run tests across direct retrieval, semantic retrieval, context compilation, summaries, jobs, provider adapters, model prompts, caches, artifacts, exports, deletion, migrations and future shared-workspace logic.
-
-## Implementation checklist
-
-- [x] Deterministic multi-principal backend canary fixtures.
-- [x] PostgreSQL/HTTP canary suite across tenant, user, account, absent-account and scope differences.
-- [x] Direct backend lexical-search isolation tests.
-- [ ] Semantic/provider-backed live-search isolation tests.
-- [x] Context-compiler isolation tests for context-store inputs.
-- [x] Backend cache isolation, poisoned-ID re-resolution, deletion invalidation, expiry/revocation and bounded eviction tests.
-- [x] Cached-candidate query/limit revalidation and auxiliary-table RLS tests.
-- [x] Canonical export/tombstone exact-principal isolation tests.
-- [ ] End-to-end Memory Service → Context Compiler cross-tenant canary tests — active milestone.
-- [ ] Job isolation tests.
-- [ ] Migration isolation tests.
-
----
-
-# 17. Shared memory and future team/workspace scopes
-
-The architecture must allow future explicit sharing without weakening private isolation.
-
-Possible scopes include private user memory, shared workspace memory, project memory, device-scoped context and team-scoped knowledge.
-
-Shared functionality must be explicit. Private memory must never become shared by default.
-
-## Implementation checklist
-
-- [ ] Final scope/visibility model for shared workspaces.
-- [ ] ACL/principal model.
-- [ ] Private-by-default sharing behavior.
+- [ ] Final shared ACL/principal model.
+- [ ] Private-by-default sharing policy.
 - [ ] Shared-workspace isolation tests.
 
 ---
 
-# 18. Memory provider must not authorize actions
+# 13. Memory never authorizes actions
 
-Long-term memory may influence relevance and defaults, but it must never grant authority.
+Memory may influence relevance/preferences, but it never grants authority.
 
-A memory like `User normally deploys on Fridays` is not permission to deploy.
+Authorization comes from:
 
-Authorization comes from authenticated identity, deterministic policy, current user instruction, required approval and device permissions.
+- authenticated identity;
+- deterministic policy;
+- current trusted user instruction;
+- required approval;
+- device/OS permissions.
 
-## Implementation checklist
+Implemented foundation:
 
-- [ ] End-to-end proof that memory cannot grant approval — active milestone coverage.
-- [ ] End-to-end proof that memory cannot change tenant identity — active milestone coverage.
-- [ ] End-to-end proof that memory cannot silently downgrade action risk — active milestone coverage.
-- [ ] Tests proving remembered preferences do not bypass authorization.
+- [x] Memory is compiled with `memory` trust.
+- [x] Bounded decision path stays memory-free.
+- [x] Cross-tenant memory cannot enter another principal's context.
+
+Active milestone must prove:
+
+- [ ] Memory cannot approve a Mac action.
+- [ ] Memory cannot change tool/device identity.
+- [ ] Memory cannot lower action risk.
+- [ ] Provider/model event cannot reinterpret memory as approval.
 
 ---
 
-# 19. Device routing and context
-
-Multiple devices may exist simultaneously.
+# 14. Device routing
 
 Rules:
 
 - explicit device reference wins;
 - trusted active-device defaults may resolve simple contextual requests;
 - ambiguous non-read actions must not be silently guessed;
-- ambiguous high-impact actions should ask the user;
+- high-impact ambiguity should ask;
 - capability routing is based on advertised capabilities, not OS assumptions.
 
-## Existing foundation
+Implemented:
 
 - [x] Capability-based DeviceRouter.
 - [x] Device/session request binding.
 - [x] Unknown-device rejection.
 - [x] Unadvertised-capability rejection.
-- [x] Deterministic explicit-device selection path in orchestrator foundation.
+- [x] Deterministic explicit-device path.
 
-## Remaining checklist
+Still open:
 
-- [ ] Trusted active-device state integrated end-to-end.
-- [ ] Human-readable device aliases.
-- [ ] Device-presence/heartbeat layer.
+- [ ] Trusted active-device state end-to-end — active milestone for local Mac.
+- [ ] Human-readable aliases.
+- [ ] Presence/heartbeat.
 - [ ] Multi-device ambiguity UX.
-- [ ] Rich context-aware device resolution using live device/application state.
 
 ---
 
-# 20. Security and approval boundary
+# 15. Security and approvals
 
-The approval design remains authoritative.
+Existing approval design remains authoritative.
 
-Non-read actions require policy/approval handling appropriate to risk.
-
-Approval grants remain bound to exact tool/action, immutable arguments, device and session; short-lived; single-use; and fail-closed.
-
-A model confidence score, bounded-decision provider, memory, webpage text or connected-service content never substitutes for approval.
-
-## Existing foundation
+Implemented:
 
 - [x] Exact tool/argument binding.
 - [x] Device/session binding.
@@ -1033,92 +821,93 @@ A model confidence score, bounded-decision provider, memory, webpage text or con
 - [x] Replay rejection.
 - [x] Default deny-all approvals in current Mac composition root.
 
-## Remaining checklist
+Still open:
 
 - [ ] Trusted local approval UI.
-- [ ] Approval UX across phone/desktop where securely permitted.
-- [ ] Risk escalation for semantic effects.
-- [ ] Audit correlation across orchestrator/device/job layers.
-- [ ] Memory-context tests proving approval boundary cannot be bypassed — active milestone coverage.
+- [ ] Cross-interface approval UX.
+- [ ] Semantic-effect risk escalation.
+- [ ] Correlation across realtime/orchestrator/device/audit — active milestone.
+- [ ] End-to-end realtime test proving model cannot bypass approval — active milestone.
 
 ---
 
-# 21. Data minimization and provider boundaries
+# 16. Data minimization
 
-Third-party model/memory providers should receive the minimum data needed for their role.
+Third-party providers receive the minimum data required for their role.
 
-A bounded-decision provider should receive structured state, bounded options and constraints, not whole conversation history or unrelated personal data.
+Rules:
 
-A long-term-memory provider receives only data approved for memory processing.
+- bounded decision providers receive explicit state/options/constraints;
+- memory provider receives only approved memory data;
+- reasoning/realtime providers receive only compiled relevant context;
+- secrets and raw provider credentials never enter model context;
+- native errors/logs are sanitized.
 
-A reasoning model receives relevant retrieved context, not the user's entire data estate.
+Checklist:
 
-## Implementation checklist
-
-- [ ] Provider-specific data-minimization policy.
-- [ ] Context redaction/secrets policy.
-- [ ] Provider request audit metadata without raw secret logging.
-- [ ] Privacy/retention policy integrated with memory/context deletion.
-- [ ] Explicit memory-context size/result budgets — active milestone.
+- [ ] Provider-specific minimization policy.
+- [ ] Secret redaction policy.
+- [ ] Provider request audit metadata without raw secrets.
+- [ ] Privacy/retention policy.
+- [x] Explicit memory-context count/byte budgets.
+- [ ] Realtime event/context payload budgets — active milestone.
 
 ---
 
-# 22. Implementation order
+# 17. Implementation order
 
-Implement incrementally, not as one giant change.
+Current status:
 
-Current status against the original sequence:
-
-1. [x] Context item schema and TenantContext foundation.
-2. [x] Context Service boundary and local durable foundation.
-3. [x] Typed session/interface/device/task context foundation.
-4. [x] Context Compiler and model-specific policies.
-5. [x] Canonical Memory Ledger contract + durable local + PostgreSQL bridge.
-6. [x] MemoryProvider abstraction + Memory Service.
-7. [~] Supermemory adapter foundation implemented; live production lifecycle validation remains open.
-8. [~] Database/cache isolation implemented and validated; live provider/semantic isolation remains open.
-9. [ ] **Long-term memory retrieval into Context Compiler — current active milestone.**
-10. [~] Canonical/local deletion complete; live provider/migration deletion verification remains open.
-11. [x] Portable canonical v3 export/snapshot.
-12. [ ] Provider migration/dual-write/shadow-read infrastructure.
-13. [ ] Shared workspace/ACL scopes when product requirements demand it.
-14. [ ] Agent-level capability layer.
+1. [x] TenantContext + ContextItem.
+2. [x] Context Service.
+3. [x] Typed session/interface/device/task context.
+4. [x] Context Compiler + model-specific policies.
+5. [x] Canonical Memory Ledger local + PostgreSQL bridge.
+6. [x] MemoryProvider + Memory Service.
+7. [~] Supermemory foundation; live lifecycle validation remains open.
+8. [~] DB/cache isolation; live semantic/provider isolation remains open.
+9. [x] Long-term memory retrieval into Context Compiler.
+10. [x] Canonical/local deletion; live provider deletion verification remains open.
+11. [x] Portable canonical v3 export.
+12. [ ] Provider migration/dual-write/shadow read.
+13. [ ] Shared workspace/ACL when required.
+14. [ ] **Realtime session + agent-level capability/tool loop + first real Mac executor slice — current active milestone.**
 15. [ ] Job Manager.
-16. [ ] Realtime/model adapter integration.
+16. [ ] Broader Mac capability surface.
 17. [ ] Mobile/desktop interface expansion.
-18. [ ] Future glasses integration.
+18. [ ] Voice/audio polish.
+19. [ ] Future glasses integration.
+20. [ ] Windows executor — deferred for current phase.
 
-Additional security milestone completed between steps 8 and 9:
+Security milestones already completed:
 
-- [x] Provider-neutral authentication/session foundation with initial Supabase verifier adapter and macOS Keychain-backed agent session.
-
-Native macOS tool development continues under the native validation gate. Windows implementation remains deferred during the current Mac-first phase.
+- [x] Provider-neutral authentication/session foundation.
+- [x] Canonical PostgreSQL memory bridge.
+- [x] Memory → Context Compiler integration.
 
 ---
 
-# 23. Definition of done for this document
+# 18. Definition of done for the overall plan
 
-This document is **not complete** until all required architecture items are implemented and tested.
+This document is **not complete** until required architecture items are implemented and tested.
 
-Do not mark the document complete merely because the main classes exist.
+Overall completion requires:
 
-The plan is done only when:
-
-- [ ] all required checklist items are complete or explicitly superseded by a documented architecture decision;
-- [ ] cross-tenant memory isolation is tested end-to-end through every production retrieval/compilation path;
-- [ ] memory-provider replacement can be demonstrated without losing canonical user memory;
-- [ ] deletion cannot resurrect data through provider, migration, indexing or cache paths;
-- [ ] context compilation is selective, freshness-aware and provenance-aware;
-- [ ] realtime, bounded-decision and reasoning models receive role-appropriate context;
-- [ ] memory is selectively retrieved into context without becoming instruction or authority;
-- [ ] one agent session can continue across at least desktop and mobile interfaces;
+- [ ] all required checklist items are complete or explicitly superseded;
+- [ ] cross-tenant isolation is proven through every production retrieval/execution path;
+- [ ] provider replacement can occur without losing canonical memory;
+- [ ] deletion cannot resurrect data through provider/migration/cache/index;
+- [ ] context compilation remains selective/freshness/provenance aware;
+- [ ] realtime, bounded, and reasoning models receive role-appropriate context;
+- [ ] memory never becomes instruction/authority;
+- [ ] one agent session can continue across desktop and mobile;
 - [ ] jobs can be started on one interface and observed from another;
-- [ ] mobile-only usage works without a desktop or glasses;
-- [ ] direct desktop usage works without a phone or glasses;
-- [ ] glasses, when supported, act as another interface to the same agent rather than a separate agent;
-- [ ] security approvals remain deterministic and cannot be bypassed by models, memory or external content;
-- [ ] provider-specific dependencies remain behind replaceable adapters;
-- [ ] production identity, canonical storage and runtime deployment boundaries have operational hardening appropriate for release.
+- [ ] phone-only mode works;
+- [ ] direct desktop mode works;
+- [ ] glasses act as another interface to the same agent;
+- [ ] approval/security boundaries cannot be bypassed by models, memory, or external content;
+- [ ] provider-specific dependencies remain replaceable;
+- [ ] production identity/storage/runtime deployment is operationally hardened.
 
 When all required items are truly implemented and verified, change the status at the top to:
 
@@ -1132,13 +921,12 @@ Until then, this file remains the active architecture and implementation checkli
 
 # Dedicated implementation documents
 
-Use these for exact implementation/security details while this file remains the master checklist:
-
-- `docs/AUTHENTICATION.md` — external identity verification, internal principal mapping, opaque sessions and macOS Keychain boundary.
-- `docs/POSTGRES_MEMORY_BRIDGE.md` — PostgreSQL canonical v3 memory persistence and Swift remote ledger bridge.
-- `docs/MEMORY_LEDGER.md` — canonical-memory semantics and local durable ledger.
-- `docs/MEMORY_SERVICE.md` — provider-neutral Memory Service/provider contract.
-- `docs/MEMORY_WRITE_SAFETY.md` — revision fencing, mutation journal and deletion safety.
-- `docs/SUPERMEMORY_ADAPTER.md` — Supermemory read-only adapter contract and capability limits.
-- `docs/SUPERMEMORY_LIVE_VALIDATION.md` — bounded live-canary procedure and vendor questions.
-- `docs/VALIDATION.md` — validation expectations and historical test coverage.
+- `docs/AUTHENTICATION.md` — external identity, internal principal mapping, opaque sessions, Keychain boundary.
+- `docs/POSTGRES_MEMORY_BRIDGE.md` — PostgreSQL canonical v3 persistence and Swift remote ledger.
+- `docs/MEMORY_LEDGER.md` — canonical memory semantics.
+- `docs/MEMORY_SERVICE.md` — provider-neutral Memory Service.
+- `docs/MEMORY_WRITE_SAFETY.md` — revision fencing, mutation journal, deletion safety.
+- `docs/SUPERMEMORY_ADAPTER.md` — Supermemory adapter contract/capabilities.
+- `docs/SUPERMEMORY_LIVE_VALIDATION.md` — bounded live-canary procedure.
+- `docs/VALIDATION.md` — repository validation expectations/history.
+- `docs/REALTIME_ORCHESTRATOR_MAC_CONTROL.md` — active realtime/orchestrator/Mac-control milestone.
