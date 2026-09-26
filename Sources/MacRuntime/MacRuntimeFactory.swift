@@ -25,6 +25,18 @@ public enum MacRuntimeFactory {
         }
     }
 
+    /// Provider credentials are supplied just-in-time by trusted app/backend
+    /// composition. The realtime adapter never writes them to disk or Keychain.
+    public static func makeOpenAIRealtimeProvider(
+        model: String = "gpt-realtime-2.1",
+        credentialProvider: @escaping OpenAIRealtimeProvider.CredentialProvider
+    ) throws -> OpenAIRealtimeProvider {
+        try OpenAIRealtimeProvider(
+            model: model,
+            credentialProvider: credentialProvider
+        )
+    }
+
     /// Production remains deny-by-default until a trusted local approval UI is
     /// wired. Tests or the future app composition root may inject ApprovalStore.
     public static func make(approvals: any ApprovalAuthorizing = DenyAllApprovals()) async throws -> ToolRuntime {
