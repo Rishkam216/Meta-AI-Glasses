@@ -25,6 +25,14 @@ function requireIdentity(value) {
   return value;
 }
 
+function invalidSession(error) {
+  // agent_api.identity() deliberately raises SQLSTATE 22023 with this fixed
+  // message for missing, expired, revoked, or otherwise unusable opaque agent
+  // sessions. Match both fields so unrelated invalid-parameter errors remain
+  // server failures rather than being mislabeled as authentication failures.
+  return error?.code === '22023' && error?.message === 'invalid_session';
+}
+
 export class RealtimeCredentialBroker {
   #database;
   #apiKey;
@@ -69,7 +77,7 @@ export class RealtimeCredentialBroker {
       });
     } catch (error) {
       if (error instanceof APIError) throw error;
-      if (error.code === '28000') throw new APIError(401, 'unauthenticated');
+      if (error.code === '28000' || invalidSession(error)) throw new APIError(401, 'unauthenticated');
       if (error.code === '42501') throw new APIError(403, 'forbidden');
       throw new APIError(503, 'identity_unavailable');
     }
