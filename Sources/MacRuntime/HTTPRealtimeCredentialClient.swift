@@ -53,6 +53,22 @@ public actor HTTPRealtimeCredentialClient {
         )
     }
 
+    // Internal seam preserves production transport policy while allowing native
+    // tests to inject a URLProtocol-backed ephemeral URLSession.
+    init(endpoint: URL,
+         expectedModel: String = "gpt-realtime-2.1",
+         bearerTokenProvider: @escaping BearerTokenProvider,
+         session: URLSession) throws {
+        try Self.validate(endpoint)
+        guard Self.validModel(expectedModel) else {
+            throw RealtimeCredentialClientError.invalidEndpoint
+        }
+        self.endpoint = endpoint
+        self.expectedModel = expectedModel
+        self.tokenProvider = bearerTokenProvider
+        self.session = session
+    }
+
     public func credential() async throws -> String {
         let agentToken: String
         do {
