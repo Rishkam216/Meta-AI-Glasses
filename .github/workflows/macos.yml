@@ -17,5 +17,7 @@ jobs:
         run: swift --version
       - name: Compile and test core and macOS adapters
         run: swift test
+      - name: Compile Realtime live canary without network
+        run: swift build --product RealtimeLiveCanary
       - name: Build and verify native app bundle
         run: bash scripts/build-app.sh
