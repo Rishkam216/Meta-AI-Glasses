@@ -24,15 +24,21 @@ public struct AppOpenInput: Codable, Sendable, Equatable {
     }
 
     public init(from decoder: any Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        guard values.allKeys.count == 1,
-              values.contains(.bundleIdentifier) else {
+        let container = try decoder.singleValueContainer()
+        let object = try container.decode([String: JSONValue].self)
+        guard object.count == 1,
+              case .string(let bundleIdentifier)? = object["bundle_identifier"] else {
             throw ToolFailure(
                 code: .invalidArguments,
                 message: "Only bundle_identifier is accepted."
             )
         }
-        try self.init(bundleIdentifier: values.decode(String.self, forKey: .bundleIdentifier))
+        try self.init(bundleIdentifier: bundleIdentifier)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(bundleIdentifier, forKey: .bundleIdentifier)
     }
 }
 
