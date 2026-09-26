@@ -19,17 +19,19 @@ The product is a personal agent platform. The agent is the product; models, inte
 
 Latest merged milestone:
 
-- PR #17: **Realtime orchestrator and native Mac control**.
-- Merged `main` commit: `8496fd7ef707653c71224ec18bd6ef2483a63cfb`.
-- Validated feature head: `dc46ad1179c06eced8b7cab7292377eec60715bd`.
+- PR #18: **Bounded OpenAI Realtime live canary**.
+- Merged `main` commit: `b41ac966780f3c5f5cbe18703f80a16e062404e3`.
+- Validated canary branch head: `413c9ae391e626361a205c67480b2fc785f96830`.
+- Successful paid-network canary commit: `f1c12c59a21143b8109ca0a127fd41056c2185ba`.
 
 Immediately preceding merged milestones:
 
+- PR #17: Realtime orchestrator and native Mac control.
 - PR #16: canonical Memory → Context Compiler integration.
 - PR #15: provider-neutral Supabase authentication foundation.
 - PR #14: PostgreSQL canonical Memory Service bridge.
 
-Merged PR #17 provides:
+Merged PR #17 provides the first user-visible text/control slice:
 
 - provider-neutral realtime session/event contracts in AgentCore;
 - semantic capability layer hiding native executor names from the model;
@@ -44,20 +46,29 @@ Merged PR #17 provides:
 - Keychain-authenticated Mac Realtime credential client;
 - menu-bar text-agent UI.
 
-The merged PR #17 head passed:
+Merged PR #18 adds the bounded live-provider validation infrastructure:
+
+- standalone `RealtimeLiveCanary` executable using the production Swift provider/transport;
+- opt-in-only GitHub Actions paid canary workflow;
+- compile-only canary validation in normal macOS CI;
+- successful one-turn real OpenAI Realtime network validation;
+- audited credential-safe live logs;
+- updated master/realtime/canary documentation.
+
+Post-merge `main` at `b41ac966780f3c5f5cbe18703f80a16e062404e3` passed:
 
 - [x] Backend isolation — embedded PostgreSQL.
 - [x] Backend isolation — native PostgreSQL.
 - [x] Portable AgentCore.
-- [x] Offline Supermemory canary harness.
+- [x] Offline live-canary harness.
 - [x] macOS AgentCore/MacRuntime compile and tests.
+- [x] Compile-only `RealtimeLiveCanary` build with no provider network call.
 - [x] Native macOS `.app` bundle build and verification.
+- [x] Paid canary did not rerun on the ordinary merge push.
 
-## Active pre-merge validation milestone — LIVE REALTIME CANARY PASSED
+## Live Realtime validation milestone — MERGED + PASSED
 
-Branch:
-
-`core/realtime-live-canary`
+Merged through PR #18.
 
 Successful paid-network canary commit:
 
@@ -375,8 +386,9 @@ Merged implementation:
 
 Live-provider validation:
 
-- branch `core/realtime-live-canary`
-- successful commit `f1c12c59a21143b8109ca0a127fd41056c2185ba`
+- PR #18 merged into `main` at `b41ac966780f3c5f5cbe18703f80a16e062404e3`
+- canary branch `core/realtime-live-canary`
+- successful canary commit `f1c12c59a21143b8109ca0a127fd41056c2185ba`
 - Actions run `36239995353`
 
 Target/implemented flow:
@@ -579,6 +591,7 @@ Still open:
 - [x] Native macOS tests/app bundle passed on merged realtime head.
 - [x] One real paid Realtime text-network canary passed on the production Swift adapter.
 - [x] Successful live canary logs were audited for credential leakage.
+- [x] PR #18 merge commit passed Backend, Portable Core, macOS, offline canary compile, and app-bundle verification on `main`.
 
 ## Definition of done for this first text/control slice
 
