@@ -5,49 +5,18 @@ import MacRuntime
 
 private enum RealtimeAppSessionError: Error, LocalizedError {
     case notReady
-    case missingCredential
-    case invalidCredential
+    case missingAgentSession
+    case invalidBackendEndpoint
 
     var errorDescription: String? {
         switch self {
         case .notReady:
             return "The realtime agent runtime is not ready yet."
-        case .missingCredential:
-            return "Enter an OpenAI API key for this app session first."
-        case .invalidCredential:
-            return "The API key is empty or contains whitespace/control characters."
+        case .missingAgentSession:
+            return "Sign in first. No valid agent session is available in Keychain."
+        case .invalidBackendEndpoint:
+            return "The configured Realtime credential endpoint is invalid."
         }
-    }
-}
-
-private actor EphemeralRealtimeCredentialVault {
-    private var credential: String?
-
-    func replace(with value: String) throws {
-        guard !value.isEmpty,
-              value == value.trimmingCharacters(in: .whitespacesAndNewlines),
-              value.utf8.count <= 8 * 1_024,
-              !value.unicodeScalars.contains(where: {
-                  CharacterSet.whitespacesAndNewlines.contains($0) || $0.value < 0x20
-              }) else {
-            throw RealtimeAppSessionError.invalidCredential
-        }
-        credential = value
-    }
-
-    func bearerToken() throws -> String {
-        guard let credential else {
-            throw RealtimeAppSessionError.missingCredential
-        }
-        return credential
-    }
-
-    func hasCredential() -> Bool {
-        credential != nil
-    }
-
-    func clear() {
-        credential = nil
     }
 }
 
@@ -64,31 +33,26 @@ private struct LocalSingleDeviceDecisionProvider: DecisionProvider {
 
 /// Composition root for the first user-visible text realtime loop.
 ///
-/// The principal/session/device identity are trusted application state and never
-/// accepted from provider/model events. The OpenAI credential is intentionally
-/// ephemeral for this development slice: it stays only in this process and is
-/// cleared when the app exits or the user replaces it.
+/// Identity is loaded from our Keychain-backed opaque agent session. The Mac
+/// never stores or accepts the standard OpenAI API key; it retrieves a short-lived
+/// Realtime credential from our authenticated backend when a provider session opens.
 actor RealtimeAppSessionController {
     private let approvals = ApprovalStore()
-    private let credentialVault = EphemeralRealtimeCredentialVault()
+    private let credentialStore = MacRuntimeFactory.makeAgentSessionStore()
     private let devices = DeviceRouter()
     private let contextStore = InMemoryContextService()
     private let deviceIdentity: DeviceIdentity
-    private let invocation: AgentInvocationContext
+    private let agentSessionID = UUID()
+    private let interfaceID = UUID()
 
     private var runtime: ToolRuntime?
     private var coordinator: RealtimeCoordinator?
     private var provider: OpenAIRealtimeProvider?
     private var liveProviderSession: (any RealtimeModelSession)?
+    private var livePrincipal: TenantContext?
 
     init() {
-        let identity = DeviceIdentity(displayName: "This Mac", platform: "macOS")
-        deviceIdentity = identity
-        invocation = AgentInvocationContext(
-            principal: TenantContext(tenantID: UUID(), userID: UUID()),
-            session: AgentSession(activeDeviceID: identity.id),
-            interfaceID: UUID()
-        )
+        deviceIdentity = DeviceIdentity(displayName: "This Mac", platform: "macOS")
     }
 
     func start() async throws {
@@ -113,38 +77,57 @@ actor RealtimeAppSessionController {
             orchestrator: orchestrator,
             approvalProvider: approvalBroker
         )
-        provider = try MacRuntimeFactory.makeOpenAIRealtimeProvider {
-            try await self.credentialVault.bearerToken()
+
+        guard let endpoint = Self.realtimeCredentialEndpoint() else {
+            throw RealtimeAppSessionError.invalidBackendEndpoint
         }
+        provider = try MacRuntimeFactory.makeAuthenticatedOpenAIRealtimeProvider(
+            credentialEndpoint: endpoint,
+            credentialStore: credentialStore
+        )
         self.runtime = runtime
     }
 
-    func setCredential(_ value: String) async throws {
-        try await credentialVault.replace(with: value)
-        if let liveProviderSession {
-            await liveProviderSession.close()
-            self.liveProviderSession = nil
-        }
-    }
-
-    func hasCredential() async -> Bool {
-        await credentialVault.hasCredential()
+    func hasAgentSession() async -> Bool {
+        (try? await credentialStore.load()) != nil
     }
 
     func run(text: String) async throws -> RealtimeTurnResult {
         guard let coordinator, let provider else {
             throw RealtimeAppSessionError.notReady
         }
-        guard await credentialVault.hasCredential() else {
-            throw RealtimeAppSessionError.missingCredential
+
+        let credential: AgentSessionCredential
+        do {
+            guard let loaded = try await credentialStore.load() else {
+                throw RealtimeAppSessionError.missingAgentSession
+            }
+            credential = loaded
+        } catch is AgentSessionCredentialError {
+            throw RealtimeAppSessionError.missingAgentSession
         }
+
+        if livePrincipal != nil, livePrincipal != credential.identity {
+            if let liveProviderSession {
+                await liveProviderSession.close()
+            }
+            liveProviderSession = nil
+            livePrincipal = nil
+        }
+
+        let invocation = AgentInvocationContext(
+            principal: credential.identity,
+            session: AgentSession(id: agentSessionID, activeDeviceID: deviceIdentity.id),
+            interfaceID: interfaceID
+        )
 
         let session: any RealtimeModelSession
         if let liveProviderSession {
             session = liveProviderSession
         } else {
-            session = try await provider.openSession(agentSessionID: invocation.session.id)
+            session = try await provider.openSession(agentSessionID: agentSessionID)
             liveProviderSession = session
+            livePrincipal = credential.identity
         }
 
         do {
@@ -156,6 +139,7 @@ actor RealtimeAppSessionController {
         } catch {
             await session.close()
             liveProviderSession = nil
+            livePrincipal = nil
             throw error
         }
     }
@@ -170,7 +154,13 @@ actor RealtimeAppSessionController {
             await liveProviderSession.close()
         }
         liveProviderSession = nil
-        await credentialVault.clear()
+        livePrincipal = nil
+    }
+
+    private static func realtimeCredentialEndpoint() -> URL? {
+        let configured = ProcessInfo.processInfo.environment["AGENT_REALTIME_CREDENTIAL_ENDPOINT"]
+            ?? "http://127.0.0.1:8787/v1/realtime/credential"
+        return URL(string: configured)
     }
 }
 
