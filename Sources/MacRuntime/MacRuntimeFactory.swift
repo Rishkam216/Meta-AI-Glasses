@@ -25,7 +25,9 @@ public enum MacRuntimeFactory {
         }
     }
 
-    public static func make() async throws -> ToolRuntime {
+    /// Production remains deny-by-default until a trusted local approval UI is
+    /// wired. Tests or the future app composition root may inject ApprovalStore.
+    public static func make(approvals: any ApprovalAuthorizing = DenyAllApprovals()) async throws -> ToolRuntime {
         let directory = auditDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
@@ -35,8 +37,9 @@ public enum MacRuntimeFactory {
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         let log = try FileAuditLog(url: directory.appendingPathComponent("audit.jsonl"))
-        let runtime = ToolRuntime(audit: log, permissions: MacPermissions())
+        let runtime = ToolRuntime(audit: log, permissions: MacPermissions(), approvals: approvals)
         try await runtime.register(FrontmostAppTool())
+        try await runtime.register(AppOpenTool())
         return runtime
     }
 }
