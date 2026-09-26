@@ -4,33 +4,29 @@ public enum MemoryContextError: Error, Sendable, Equatable {
     case invalidQuery
     case invalidLimit
     case invalidMaxBytes
-    case invalidProviderID
     case ownershipMismatch
     case invalidResponse
 }
 
-/// The compiler can use canonical retrieval without a memory provider, or opt in
-/// to one configured provider deployment. Provider choice is infrastructure
-/// configuration, never authoritative model output.
+/// Retrieval source is infrastructure configuration on the retriever, never part
+/// of a model-facing semantic query.
 public enum MemoryContextRetrievalStrategy: Sendable, Equatable {
     case canonical
     case provider(String)
 }
 
-/// Selective long-term-memory request. Tenant identity is deliberately absent;
-/// the authenticated caller passes TenantContext separately.
+/// Selective long-term-memory request. Tenant identity and provider selection are
+/// deliberately absent; trusted infrastructure supplies both separately.
 public struct MemoryContextQuery: Sendable, Equatable {
     public let text: String
     public let scopes: Set<MemoryScope>
     public let limit: Int
     public let maxBytes: Int
-    public let strategy: MemoryContextRetrievalStrategy
 
     public init(text: String,
                 scopes: Set<MemoryScope>,
                 limit: Int = 8,
-                maxBytes: Int = 16_384,
-                strategy: MemoryContextRetrievalStrategy = .canonical) throws {
+                maxBytes: Int = 16_384) throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, text.utf8.count <= 4_096 else {
             throw MemoryContextError.invalidQuery
@@ -44,15 +40,10 @@ public struct MemoryContextQuery: Sendable, Equatable {
         guard (256...262_144).contains(maxBytes) else {
             throw MemoryContextError.invalidMaxBytes
         }
-        if case .provider(let providerID) = strategy,
-           !validMemoryProviderID(providerID) {
-            throw MemoryContextError.invalidProviderID
-        }
         self.text = text
         self.scopes = scopes
         self.limit = limit
         self.maxBytes = maxBytes
-        self.strategy = strategy
     }
 }
 
@@ -62,14 +53,18 @@ public protocol MemoryContextRetrieving: Sendable {
                   now: Date) async throws -> [ContextItem]
 }
 
-/// Converts canonical MemoryService results into untrusted long-term context.
-/// Raw source references and tenant identifiers are intentionally not copied into
-/// provider-facing context. Canonical IDs and provenance categories are retained.
+/// Converts MemoryService results into untrusted long-term context. Provider
+/// choice is fixed when this adapter is composed, not selected by query/model
+/// output. Raw source references and tenant identifiers are intentionally not
+/// copied into provider-facing context.
 public struct MemoryContextRetriever: MemoryContextRetrieving, Sendable {
     private let service: MemoryService
+    private let strategy: MemoryContextRetrievalStrategy
 
-    public init(service: MemoryService) {
+    public init(service: MemoryService,
+                strategy: MemoryContextRetrievalStrategy = .canonical) {
         self.service = service
+        self.strategy = strategy
     }
 
     public func retrieve(_ query: MemoryContextQuery,
@@ -77,7 +72,11 @@ public struct MemoryContextRetriever: MemoryContextRetrieving, Sendable {
                          now: Date = Date()) async throws -> [ContextItem] {
         let retrieved: [RetrievedMemory]
         do {
-            retrieved = try await service.retrieveForContext(query, as: principal)
+            retrieved = try await service.retrieveForContext(
+                query,
+                strategy: strategy,
+                as: principal
+            )
         } catch MemoryLedgerError.ownershipMismatch {
             throw MemoryContextError.ownershipMismatch
         } catch is CancellationError {
@@ -98,7 +97,7 @@ public struct MemoryContextRetriever: MemoryContextRetrieving, Sendable {
                 throw MemoryContextError.invalidResponse
             }
 
-            let item = try contextItem(for: result, principal: principal, now: now)
+            let item = try contextItem(for: result, principal: principal)
             let size = try encoder.encode(item).count
             guard encodedBytes + size <= query.maxBytes else { continue }
             items.append(item)
@@ -110,8 +109,7 @@ public struct MemoryContextRetriever: MemoryContextRetrieving, Sendable {
     }
 
     private func contextItem(for retrieved: RetrievedMemory,
-                             principal: TenantContext,
-                             now: Date) throws -> ContextItem {
+                             principal: TenantContext) throws -> ContextItem {
         let record = retrieved.record
         let sourceTypes = Set(record.sourceReferences.map(\.type.rawValue)).sorted()
         let derivedIDs = record.derivedFromMemoryIDs
