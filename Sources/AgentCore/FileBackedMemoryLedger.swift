@@ -166,7 +166,7 @@ final class LockedMemoryFile: Sendable {
                 close(fd)
                 fd = next
             }
-            try Self.validateDirectory(fd)
+            try Self.prepareFreshDirectoryIfNeeded(fd, stateName: name)
         } catch {
             close(fd)
             throw error
@@ -241,6 +241,32 @@ final class LockedMemoryFile: Sendable {
             throw MemoryPersistenceError.ioFailure
         }
         guard fsync(directoryFD) == 0 else { throw MemoryPersistenceError.commitOutcomeUnknown }
+    }
+
+    /// Some Foundation implementations create a requested 0700 directory as
+    /// 0755. Before any state or lock file exists, it is safe to tighten that
+    /// owner-owned, non-writable-by-others directory to the required 0700 mode.
+    /// Existing stores are never auto-repaired: permission drift fails closed.
+    private static func prepareFreshDirectoryIfNeeded(_ fd: Int32, stateName: String) throws {
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
+              info.st_uid == geteuid() else {
+            throw MemoryPersistenceError.insecureDirectory
+        }
+        if (info.st_mode & 0o077) == 0 { return }
+        guard (info.st_mode & 0o077) == 0o055,
+              !entryExists(fd, name: stateName),
+              !entryExists(fd, name: stateName + ".lock"),
+              fchmod(fd, mode_t(0o700)) == 0 else {
+            throw MemoryPersistenceError.insecureDirectory
+        }
+        try validateDirectory(fd)
+    }
+
+    private static func entryExists(_ directoryFD: Int32, name: String) -> Bool {
+        var info = stat()
+        if fstatat(directoryFD, name, &info, AT_SYMLINK_NOFOLLOW) == 0 { return true }
+        return errno != ENOENT
     }
 
     private static func validateDirectory(_ fd: Int32) throws {
