@@ -28,7 +28,7 @@ BEGIN
 
   -- Serialize first login for one external subject so concurrent exchanges cannot
   -- create multiple internal principals for the same provider identity.
-  PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || chr(0) || issuer_name || chr(0) || subject_name, 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended(jsonb_build_array(provider_name,issuer_name,subject_name)::text,0));
   SELECT principal_id INTO p FROM agent_private.external_identities
     WHERE provider=provider_name AND issuer=issuer_name AND subject=subject_name;
   IF p IS NOT NULL THEN
