@@ -1,4 +1,4 @@
-import AgentCore
+@testable import AgentCore
 import Foundation
 import Testing
 @testable import MacRuntime
@@ -242,8 +242,9 @@ private func openProvider(transport: FakeOpenAIRealtimeTransport,
     }
     #expect(text.text == "TextEdit is open.")
 
-    let completed = try await session.nextEvent()
-    guard case .turnCompleted? = completed else {
+    let completedEvent = try await session.nextEvent()
+    guard let completedEvent,
+          case .turnCompleted = completedEvent else {
         Issue.record("Expected completion after post-tool response")
         return
     }
