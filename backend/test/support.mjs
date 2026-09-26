@@ -24,8 +24,17 @@ export async function createTestDatabase() {
   if (!['localhost','127.0.0.1','[::1]'].includes(url.hostname) || url.pathname !== '/agent_isolation_test')
     throw new Error('disposable_local_test_database_required');
   const adminPool = new pg.Pool({ connectionString: url.href });
-  for (const migration of migrations) await adminPool.query(migration);
-  await adminPool.query("ALTER ROLE agent_runtime LOGIN PASSWORD 'test-runtime-only'; ALTER ROLE agent_auth LOGIN PASSWORD 'test-auth-only'");
+
+  // node:test files run sequentially against one native PostgreSQL service. The
+  // bootstrap migration owns roles and default privileges at cluster/database
+  // scope, so it must run once. Later test files reuse that isolated fixture;
+  // each test issues fresh random principals, so persisted rows cannot collide.
+  const installed = await adminPool.query("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='agent_owner') AS value");
+  if (!installed.rows[0].value) {
+    for (const migration of migrations) await adminPool.query(migration);
+    await adminPool.query("ALTER ROLE agent_runtime LOGIN PASSWORD 'test-runtime-only'; ALTER ROLE agent_auth LOGIN PASSWORD 'test-auth-only'");
+  }
+
   const pool = (role, password) => {
     const u = new URL(url); u.username = role; u.password = password;
     return new pg.Pool({ connectionString: u.href, max: 4 });
