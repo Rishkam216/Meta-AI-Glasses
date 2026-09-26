@@ -243,11 +243,11 @@ final class LockedMemoryFile: Sendable {
         guard fsync(directoryFD) == 0 else { throw MemoryPersistenceError.commitOutcomeUnknown }
     }
 
-    /// Some Foundation implementations do not preserve a requested 0700 mode
-    /// when creating a fresh directory. Before any state or lock exists, it is
-    /// safe to tighten an owner-owned directory as long as no other principal
-    /// can write into it. Existing stores are never auto-repaired: permission
-    /// drift after state exists still fails closed.
+    /// Foundation does not guarantee that requested POSIX permissions survive
+    /// directory creation identically on every supported platform. A brand-new
+    /// owner-owned directory can be tightened before any state is trusted.
+    /// Existing stores are never auto-repaired: permission drift after state or
+    /// lock creation still fails closed.
     private static func prepareFreshDirectoryIfNeeded(_ fd: Int32, stateName: String) throws {
         var info = stat()
         guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
@@ -255,8 +255,7 @@ final class LockedMemoryFile: Sendable {
             throw MemoryPersistenceError.insecureDirectory
         }
         if (info.st_mode & 0o077) == 0 { return }
-        guard (info.st_mode & 0o022) == 0,
-              !entryExists(fd, name: stateName),
+        guard !entryExists(fd, name: stateName),
               !entryExists(fd, name: stateName + ".lock"),
               fchmod(fd, mode_t(0o700)) == 0 else {
             throw MemoryPersistenceError.insecureDirectory
