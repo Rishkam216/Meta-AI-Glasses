@@ -87,6 +87,16 @@ public actor DeviceRouter {
         return values.sorted { $0.identity.id.uuidString < $1.identity.id.uuidString }
     }
 
+    public func snapshot(for deviceID: UUID) async throws -> DeviceSnapshot {
+        guard let executor = executors[deviceID] else {
+            throw DeviceRoutingError.unknownDevice(deviceID)
+        }
+        return DeviceSnapshot(
+            identity: executor.identity,
+            capabilities: await executor.capabilities()
+        )
+    }
+
     public func candidates(for tool: String) async -> [DeviceSnapshot] {
         let all = await snapshots()
         return all.filter { snapshot in
@@ -95,11 +105,8 @@ public actor DeviceRouter {
     }
 
     public func descriptor(for tool: String, on deviceID: UUID) async throws -> ToolDescriptor {
-        guard let executor = executors[deviceID] else {
-            throw DeviceRoutingError.unknownDevice(deviceID)
-        }
-        let capabilities = await executor.capabilities()
-        guard let descriptor = capabilities.first(where: { $0.name == tool }) else {
+        let snapshot = try await snapshot(for: deviceID)
+        guard let descriptor = snapshot.capabilities.first(where: { $0.name == tool }) else {
             throw DeviceRoutingError.capabilityUnavailable(deviceID: deviceID, tool: tool)
         }
         return descriptor
