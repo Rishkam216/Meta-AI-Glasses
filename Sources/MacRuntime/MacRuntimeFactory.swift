@@ -7,6 +7,24 @@ public enum MacRuntimeFactory {
             .appendingPathComponent("Library/Application Support/MetaAIGlasses", isDirectory: true)
     }
 
+    public static func makeAgentSessionStore() -> KeychainAgentSessionStore {
+        KeychainAgentSessionStore()
+    }
+
+    public static func makeAuthExchangeClient(endpoint: URL,
+                                              credentialStore: KeychainAgentSessionStore) throws -> AuthExchangeClient {
+        try AuthExchangeClient(endpoint: endpoint, credentialStore: credentialStore)
+    }
+
+    /// Memory uses only our opaque agent session loaded from Keychain. It never
+    /// receives a Supabase access token.
+    public static func makeAuthenticatedMemoryStore(endpoint: URL,
+                                                    credentialStore: KeychainAgentSessionStore) throws -> HTTPMemorySnapshotStore {
+        try HTTPMemorySnapshotStore(endpoint: endpoint) {
+            try await credentialStore.bearerToken()
+        }
+    }
+
     public static func make() async throws -> ToolRuntime {
         let directory = auditDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
