@@ -9,12 +9,14 @@ private final class RealtimeCredentialURLProtocol: URLProtocol, @unchecked Senda
     override func startLoading() {
         let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
         let contentType = request.value(forHTTPHeaderField: "Content-Type") ?? ""
-        let body = request.httpBody.map { String(decoding: $0, as: UTF8.self) } ?? ""
         let status: Int
         let responseBody: Data
 
+        // URLProtocol may expose a streamed request body instead of request.httpBody,
+        // so this transport mock validates method/path/content type and leaves the
+        // exact `{}` body contract to the backend HTTP tests.
         if request.url?.path != "/v1/realtime/credential" ||
-            request.httpMethod != "POST" || contentType != "application/json" || body != "{}" {
+            request.httpMethod != "POST" || contentType != "application/json" {
             status = 400
             responseBody = Data("{\"error\":\"invalid_request\"}".utf8)
         } else if authorization == "Bearer \(String(repeating: "B", count: 43))" {
