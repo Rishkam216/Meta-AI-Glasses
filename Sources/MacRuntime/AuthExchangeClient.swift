@@ -40,6 +40,16 @@ public actor AuthExchangeClient {
                                   delegate: RefuseAuthRedirects(), delegateQueue: nil)
     }
 
+    // Internal initializer keeps production transport policy fixed while allowing
+    // deterministic URLProtocol-based native tests without external network calls.
+    init(endpoint: URL, credentialStore: any AgentSessionCredentialStoring,
+         session: URLSession) throws {
+        try Self.validate(endpoint)
+        self.endpoint = endpoint
+        self.credentialStore = credentialStore
+        self.session = session
+    }
+
     public func exchange(externalAccessToken: String) async throws -> AgentSessionCredential {
         guard Self.validExternalToken(externalAccessToken) else { throw AuthExchangeError.invalidExternalToken }
         var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalCacheData,
