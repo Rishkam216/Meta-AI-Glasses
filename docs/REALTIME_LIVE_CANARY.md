@@ -1,6 +1,6 @@
 # OpenAI Realtime Live Canary
 
-Status: **Invocation mechanism ready; live result pending**
+Status: **Second bounded invocation requested after repository secret configuration; live result pending**
 
 Created: 2026-09-26
 
@@ -54,6 +54,11 @@ Required bounds:
 - no secret/token logging;
 - fail closed on malformed provider responses;
 - fail immediately when `OPENAI_API_KEY` is absent.
+
+## Invocation history
+
+- 2026-09-26: first guarded invocation stopped at the repository-secret gate because `OPENAI_API_KEY` was absent; no OpenAI request was made and no API credit was used.
+- 2026-09-26: repository owner reported `OPENAI_API_KEY` configured; one bounded rerun requested.
 
 ## Success criteria
 
