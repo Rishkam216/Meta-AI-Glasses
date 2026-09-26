@@ -62,9 +62,11 @@ BEGIN
   RETURN result;
 END $$;
 
--- Production agent_auth may mint sessions only from a verified external identity.
--- Arbitrary internal-principal session issuance remains available only to database
--- owners/admins for controlled migration and test fixtures.
+-- Defense in depth: do not depend only on ALTER DEFAULT PRIVILEGES from the
+-- bootstrap migration. Only the isolated agent_auth login can mint external
+-- sessions; the helper is owner-only and runs through the SECURITY DEFINER call.
+REVOKE ALL ON FUNCTION agent_private.resolve_external_principal(text,text,text) FROM PUBLIC, agent_runtime, agent_writer, agent_auth;
+REVOKE ALL ON FUNCTION agent_private.issue_external_session(text,text,text,bytea,timestamptz) FROM PUBLIC, agent_runtime, agent_writer;
 REVOKE EXECUTE ON FUNCTION agent_private.issue_session(uuid,uuid,uuid,bytea,timestamptz) FROM agent_auth;
 GRANT EXECUTE ON FUNCTION agent_private.issue_external_session(text,text,text,bytea,timestamptz),
   agent_private.revoke_session(bytea) TO agent_auth;
