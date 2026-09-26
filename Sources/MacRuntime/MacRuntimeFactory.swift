@@ -25,7 +25,40 @@ public enum MacRuntimeFactory {
         }
     }
 
-    public static func make() async throws -> ToolRuntime {
+    /// Provider credentials are supplied just-in-time by trusted app/backend
+    /// composition. The realtime adapter never writes them to disk or Keychain.
+    public static func makeOpenAIRealtimeProvider(
+        model: String = "gpt-realtime-2.1",
+        credentialProvider: @escaping OpenAIRealtimeProvider.CredentialProvider
+    ) throws -> OpenAIRealtimeProvider {
+        try OpenAIRealtimeProvider(
+            model: model,
+            credentialProvider: credentialProvider
+        )
+    }
+
+    /// Production path: the Mac presents only our Keychain-backed opaque agent
+    /// session to our backend. The backend mints a short-lived Realtime secret;
+    /// the standard OpenAI API key never reaches the Mac process.
+    public static func makeAuthenticatedOpenAIRealtimeProvider(
+        credentialEndpoint: URL,
+        credentialStore: KeychainAgentSessionStore,
+        model: String = "gpt-realtime-2.1"
+    ) throws -> OpenAIRealtimeProvider {
+        let client = try HTTPRealtimeCredentialClient(
+            endpoint: credentialEndpoint,
+            expectedModel: model
+        ) {
+            try await credentialStore.bearerToken()
+        }
+        return try makeOpenAIRealtimeProvider(model: model) {
+            try await client.credential()
+        }
+    }
+
+    /// Production remains deny-by-default until a trusted local approval UI is
+    /// wired. Tests or the future app composition root may inject ApprovalStore.
+    public static func make(approvals: any ApprovalAuthorizing = DenyAllApprovals()) async throws -> ToolRuntime {
         let directory = auditDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
@@ -35,8 +68,9 @@ public enum MacRuntimeFactory {
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         let log = try FileAuditLog(url: directory.appendingPathComponent("audit.jsonl"))
-        let runtime = ToolRuntime(audit: log, permissions: MacPermissions())
+        let runtime = ToolRuntime(audit: log, permissions: MacPermissions(), approvals: approvals)
         try await runtime.register(FrontmostAppTool())
+        try await runtime.register(AppOpenTool())
         return runtime
     }
 }
