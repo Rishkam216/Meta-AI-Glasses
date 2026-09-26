@@ -6,9 +6,12 @@
 -- durable atomic persistence, optimistic concurrency, and database-enforced
 -- cross-principal isolation. The entire v3 canonical state changes in one CAS.
 BEGIN;
+CREATE SCHEMA agent_canonical AUTHORIZATION agent_owner;
+REVOKE ALL ON SCHEMA agent_canonical FROM PUBLIC;
+GRANT USAGE ON SCHEMA agent_canonical TO agent_writer, agent_runtime;
 SET LOCAL ROLE agent_owner;
 
-CREATE TABLE agent_data.canonical_memory_snapshots (
+CREATE TABLE agent_canonical.snapshots (
   principal_id uuid PRIMARY KEY DEFAULT agent_private.current_principal(),
   revision bigint NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
   snapshot jsonb NOT NULL CHECK (
@@ -22,14 +25,14 @@ CREATE TABLE agent_data.canonical_memory_snapshots (
   ),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
-ALTER TABLE agent_data.canonical_memory_snapshots ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_data.canonical_memory_snapshots FORCE ROW LEVEL SECURITY;
-CREATE POLICY own_principal ON agent_data.canonical_memory_snapshots
+ALTER TABLE agent_canonical.snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_canonical.snapshots FORCE ROW LEVEL SECURITY;
+CREATE POLICY own_principal ON agent_canonical.snapshots
   TO agent_runtime, agent_writer
   USING (principal_id = (SELECT agent_private.current_principal()))
   WITH CHECK (principal_id = (SELECT agent_private.current_principal()));
-GRANT SELECT ON agent_data.canonical_memory_snapshots TO agent_runtime;
-GRANT SELECT, INSERT, UPDATE ON agent_data.canonical_memory_snapshots TO agent_writer;
+GRANT SELECT ON agent_canonical.snapshots TO agent_runtime;
+GRANT SELECT, INSERT, UPDATE ON agent_canonical.snapshots TO agent_writer;
 
 -- A request may never smuggle another tenant/user/account identity inside the
 -- opaque snapshot. The function is owned by agent_owner because the writer role
@@ -93,7 +96,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE p uuid := agent_private.current_principal(); r bigint; doc jsonb;
 BEGIN
   SELECT revision,snapshot INTO r,doc
-    FROM agent_data.canonical_memory_snapshots WHERE principal_id=p;
+    FROM agent_canonical.snapshots WHERE principal_id=p;
   IF r IS NULL THEN
     RETURN jsonb_build_object('revision',0,'snapshot',NULL);
   END IF;
@@ -115,11 +118,11 @@ BEGIN
   -- still makes lost-update detection explicit to remote Swift clients.
   PERFORM pg_advisory_xact_lock(hashtextextended('canonical:' || p::text,0));
   IF expected_revision = 0 THEN
-    INSERT INTO agent_data.canonical_memory_snapshots(principal_id,revision,snapshot)
+    INSERT INTO agent_canonical.snapshots(principal_id,revision,snapshot)
       VALUES(p,1,doc) ON CONFLICT(principal_id) DO NOTHING
       RETURNING revision INTO next_revision;
   ELSE
-    UPDATE agent_data.canonical_memory_snapshots
+    UPDATE agent_canonical.snapshots
       SET revision=revision+1,snapshot=doc,updated_at=clock_timestamp()
       WHERE principal_id=p AND revision=expected_revision
         AND revision < 9007199254740991
@@ -137,5 +140,5 @@ ALTER FUNCTION agent_api.canonical_memory_load() OWNER TO agent_writer;
 ALTER FUNCTION agent_api.canonical_memory_commit(bigint,jsonb) OWNER TO agent_writer;
 GRANT EXECUTE ON FUNCTION agent_api.canonical_memory_load(),
   agent_api.canonical_memory_commit(bigint,jsonb) TO agent_runtime;
-REVOKE ALL ON agent_data.canonical_memory_snapshots FROM PUBLIC;
+REVOKE ALL ON agent_canonical.snapshots FROM PUBLIC;
 COMMIT;
