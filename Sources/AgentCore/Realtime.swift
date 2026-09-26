@@ -11,6 +11,7 @@ public enum RealtimeValidationError: Error, Sendable, Equatable {
 public enum RealtimeProtocolError: Error, Sendable, Equatable {
     case providerClosed
     case wrongTurn
+    case duplicateEventMismatch
     case toolCallLimitExceeded
     case providerFailure(String)
 }
