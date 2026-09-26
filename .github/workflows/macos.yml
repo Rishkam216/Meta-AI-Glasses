@@ -19,5 +19,7 @@ jobs:
         run: swift test
       - name: Compile Realtime live canary without network
         run: swift build --product RealtimeLiveCanary
+      - name: Compile manual Mac control canary without running it
+        run: swift build --product MacControlCanary
       - name: Build and verify native app bundle
         run: bash scripts/build-app.sh

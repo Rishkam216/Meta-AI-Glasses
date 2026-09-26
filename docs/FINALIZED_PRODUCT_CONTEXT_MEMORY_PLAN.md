@@ -15,6 +15,25 @@ The product is a personal agent platform. The agent is the product; models, inte
 
 # 0. Current implementation checkpoint
 
+## Active bounded milestone — Calculator execution validation
+
+Branch: `core/calculator-execution-validation`, based on `805c7f0`.
+The baseline's Backend, Portable core, and macOS workflows were freshly confirmed
+successful before this work. This slice adds stitched OpenAI wire-to-native-tool
+tests for allow/deny/expiry/replay and a manual, opt-in Calculator-only diagnostic.
+No production scope expansion or paid provider call is included in implementation.
+
+- [ ] New stitched tests and manual diagnostic pass native CI.
+- [ ] Real model tool call → exact local human approval → native Calculator launch
+  is verified on an interactive Mac.
+- [ ] Shipping menu-bar approval UI is validated with real provider execution.
+
+Local regression checks: 22 offline harness tests passed; backend 54 passed,
+0 failed, 3 native-only skipped. Native CI is pending for this branch. Do not
+interpret an injected OS launcher in automated tests as real Mac execution.
+See `docs/CALCULATOR_EXECUTION_VALIDATION.md` for the cost bounds, prerequisites,
+exact manual command, evidence distinctions, and session stopping point.
+
 ## Current `main`
 
 Latest merged milestone:

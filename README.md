@@ -5,6 +5,19 @@ The user's handoff is authoritative; see [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 ## Current milestone
 
+The realtime text/control slice and bounded live text canary are merged through
+PR #18. The Mac app now wires a local exact-action approval UI, native `app.open`,
+and the OpenAI Realtime adapter through the provider-neutral coordinator.
+PostgreSQL canonical memory and the authentication foundation are also integrated.
+Production login/deployment, voice, and live model-driven Mac execution are not
+yet validated. See the [master checkpoint](docs/FINALIZED_PRODUCT_CONTEXT_MEMORY_PLAN.md)
+and [Calculator validation runbook](docs/CALCULATOR_EXECUTION_VALIDATION.md).
+
+The sections below describe the original runtime foundation and diagnostic build
+flow; their historical test counts are not the current suite totals.
+
+## Original runtime foundation
+
 - Swift 6 package, macOS 14+ native menu-bar app; no third-party dependencies.
 - Typed tool protocol, JSON result/error contract, runtime capability catalog.
 - Ephemeral approval foundation for future mutating tools: exact tool/arguments,
@@ -16,16 +29,15 @@ The user's handoff is authoritative; see [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 - `AgentOrchestrator` binds tool intents to sessions and devices. Ambiguous
   bounded AI device selection is opt-in and read-only; ambiguous non-read actions
   require deterministic device context before approval/execution.
-- The Mac app still wires `DenyAllApprovals`, so no non-read tool can execute yet.
+- The runtime factory defaults to `DenyAllApprovals`; the realtime app composition
+  explicitly supplies its trusted local approval store and UI.
 - Permission preflight, explicit user-initiated Accessibility request.
 - Metadata-only JSONL audit log; failed initial audit prevents execution.
 - One real native tool: `ui.get_frontmost_app`, using `NSWorkspace`.
 
-No model SDK, Jev adapter, voice, shell, file editing, network listener, cloud
-gateway, or glasses integration is implemented. Unimplemented tools are absent
-from the catalog. The approval store is infrastructure only; there is not yet a
-local approval UI. The device router is in-memory only; encrypted remote transport
-comes later.
+No Jev adapter, voice, shell, file editing, or glasses integration is implemented.
+Unimplemented tools are absent from the catalog. The device router is in-memory
+only; encrypted remote device transport comes later.
 
 ## Build on your Mac
 
@@ -78,9 +90,9 @@ RUN_MAC_GUI_TESTS=1 swift test
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for actual results and the remaining
 native checks. See [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md) for the decision
-and routing contract. Do not add a mutating native tool until the macOS build gate
-passes and a trusted local approval UI is wired to the approval store.
+and routing contract. Every additional mutating native tool must preserve the
+macOS build gate and trusted exact-action approval boundary.
 
 ## Backend isolation
 
-The PostgreSQL-backed memory storage API, opaque-session authentication boundary, forced row-level security and scoped lexical cache are implemented under [backend](backend/README.md). Run its independent database/HTTP isolation suite with `cd backend && npm ci --ignore-scripts && npm test`. This module is not yet wired to the Swift canonical ledger or deployed; the backend README specifies the remaining gates.
+The PostgreSQL-backed memory storage API, opaque-session authentication boundary, forced row-level security and scoped lexical cache are implemented under [backend](backend/README.md). Run its independent database/HTTP isolation suite with `cd backend && npm ci --ignore-scripts && npm test`. The Swift canonical-ledger bridge is merged; production deployment remains open. The master checkpoint specifies the remaining gates.
