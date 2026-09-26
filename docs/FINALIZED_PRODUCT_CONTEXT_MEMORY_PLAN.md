@@ -28,9 +28,32 @@ Immediately preceding merged milestones:
 - PR #15: provider-neutral Supabase authentication foundation.
 - PR #14: PostgreSQL canonical Memory Service bridge.
 
-## Post-merge validation
+## Active pre-merge milestone
 
-The exact merged `main` commit for PR #16 is green on all repository CI lanes:
+Branch:
+
+`core/realtime-orchestrator-mac-control`
+
+Implemented on this branch:
+
+- provider-neutral realtime session/event contracts in AgentCore;
+- semantic capability layer hiding native executor names from the model;
+- realtime coordinator through AgentOrchestrator and DeviceRouter;
+- selective authenticated memory compilation for realtime turns;
+- real macOS `ui.get_frontmost_app` read path via `computer.inspect`;
+- real macOS `app.open` action path via `computer.open_app`;
+- trusted local exact single-use approval UI;
+- duplicate/replay-safe action handling;
+- text-first OpenAI Realtime WebSocket adapter outside AgentCore;
+- backend-issued short-lived Realtime credential path using our opaque agent session;
+- Keychain-authenticated Mac Realtime credential client;
+- menu-bar text-agent UI.
+
+Latest fully validated **code** head before the documentation-only commits:
+
+`06e237fd97450b53c70718c6d7cd2f9e28c2ba79`
+
+That exact code head passed:
 
 - [x] Backend isolation — embedded PostgreSQL.
 - [x] Backend isolation — native PostgreSQL.
@@ -39,7 +62,18 @@ The exact merged `main` commit for PR #16 is green on all repository CI lanes:
 - [x] macOS AgentCore/MacRuntime compile and tests.
 - [x] Native macOS `.app` bundle build and verification.
 
-Historical GitHub Actions billing/runner failures no longer describe the current validation state.
+The final documentation head must receive the same exact-head gates before PR merge.
+
+Not claimed by this checkpoint:
+
+- live paid OpenAI Realtime network canary;
+- automatic provider transport reconnect/resume hardening;
+- voice/audio UX;
+- production Supabase configuration/login UX;
+- production backend/cloud deployment;
+- broader Mac click/type/file/process/shell/screen tool surface.
+
+Details: `docs/REALTIME_ORCHESTRATOR_MAC_CONTROL.md`.
 
 ## Authentication foundation
 
@@ -56,7 +90,7 @@ Stable internal tenant_id / user_id
     ↓
 Opaque short-lived agent session
     ↓
-Memory / Context / Jobs / Devices / Approvals
+Memory / Context / Jobs / Devices / Approvals / Realtime credential broker
 ```
 
 Implemented:
@@ -72,6 +106,8 @@ Implemented:
 - [x] External provider access token is not persisted by the Mac exchange layer.
 - [x] Runtime/writer DB roles cannot invoke session issuance.
 - [x] Repeated-login, concurrent-login, isolation, revocation, HTTP exchange/logout, and privilege-regression tests.
+- [x] Realtime credential endpoint derives principal from the opaque agent session.
+- [x] Invalid/expired/revoked Realtime sessions fail before the upstream model provider is called.
 
 Still open:
 
@@ -128,7 +164,7 @@ Details: `docs/POSTGRES_MEMORY_BRIDGE.md`.
 
 Merged through PR #16.
 
-Target path now exists:
+Target path:
 
 ```text
 Authenticated Agent Session
@@ -171,6 +207,7 @@ Completed guarantees:
 - [x] Prompt-injection-shaped memory remains untrusted data.
 - [x] Orchestrator exposes the authenticated model-context compilation boundary.
 - [x] Exact feature head and merged `main` passed all required CI.
+- [x] Realtime-specific test proves opt-in memory is retrieved under trusted `TenantContext` and remains `trust = memory`.
 
 ---
 
@@ -207,13 +244,13 @@ Required future modes:
 
 Checklist:
 
-- [ ] First-class interface-adapter contract.
-- [ ] One agent identity proven across at least two real interfaces.
+- [ ] First-class multi-interface adapter contract beyond the desktop/realtime provider boundary.
+- [ ] One agent identity proven across at least two real user interfaces.
 - [ ] Cross-interface session continuation.
 - [ ] Cross-interface job visibility.
-- [ ] Interface-origin metadata on every user request.
-- [ ] Explicit-device instruction override end-to-end.
-- [ ] Trusted active-device resolution.
+- [x] Interface/session identifiers carried in the trusted desktop invocation path.
+- [x] Explicit-device instruction override is enforced in the realtime orchestrator path.
+- [x] Trusted local active-device resolution exists for the first Mac slice.
 - [x] Provider-neutral external-auth foundation.
 - [x] Opaque internal agent-session foundation.
 
@@ -224,7 +261,7 @@ Checklist:
 An **interface** is where the user communicates with the agent.  
 A **device executor** is where capabilities execute.
 
-The desktop app eventually implements both roles.
+The desktop app implements both roles for the first local slice.
 
 Potential Mac executor tools:
 
@@ -247,9 +284,11 @@ All execution remains subject to OS permissions, deterministic policy, approvals
 Checklist:
 
 - [ ] Mobile interface client.
-- [ ] Desktop conversational interface client.
+- [x] Desktop text conversational interface client foundation.
+- [ ] Desktop voice interface.
 - [ ] Mobile executor boundary.
 - [x] Native macOS executor/runtime boundary foundation.
+- [x] Desktop interface → orchestrator → local Mac executor proven for first read/action slice.
 - [ ] Windows executor — deferred.
 - [ ] Future glasses companion boundary.
 
@@ -301,204 +340,232 @@ Existing foundation:
 - [x] Exact single-use approvals.
 - [x] Context Compiler integration.
 - [x] Selective Memory → Context integration.
-- [ ] Realtime session/provider adapter integrated with orchestrator — **active milestone**.
-- [ ] Real Mac executor capabilities invoked through orchestrator — **active milestone**.
+- [x] Provider-neutral realtime session/provider contract integrated with orchestrator.
+- [x] Real Mac read/action executor capabilities invoked through orchestrator.
 
 ---
 
-# 4. Immediate active milestone: Realtime AI → Orchestrator → Mac Executor
+# 4. Realtime AI → Orchestrator → Mac Executor — FIRST TEXT SLICE IMPLEMENTED
 
-Active branch:
+Branch:
 
 `core/realtime-orchestrator-mac-control`
 
-This milestone is the first user-visible control loop. It must not bypass the architecture already built.
-
-Target flow:
+Target/implemented flow:
 
 ```text
-Mac conversational interface
+Mac text interface
         ↓
-RealtimeSession
+RealtimeModelSession
         ↓
-RealtimeModelProvider
+provider adapter
         ↓ structured user/model events
+RealtimeCoordinator
+        ↓
 Agent Orchestrator
         ↓
 Context Compiler + selective Memory
         ↓
-Agent-level capability / tool intent
+semantic capability intent
         ↓
 Device Router
         ↓
-Policy + approval boundary
+prepare exact native operation
+        ↓
+Policy + local approval when required
         ↓
 Mac Executor
         ↓
-typed tool result
+typed semantic tool result
         ↓
-Agent Orchestrator
+Realtime session
         ↓
-RealtimeSession
-        ↓
-response to user
+assistant response
 ```
 
-## Architecture decisions
+## Architecture decisions retained
 
 ### Provider neutrality
 
-Realtime transport must sit behind a provider-neutral contract.
-
-Initial provider may be OpenAI Realtime, but:
-
-- AgentCore must not import provider-specific event types.
-- Orchestrator must not know websocket/event names from a vendor.
-- Provider-specific session/auth/audio handling stays in an adapter.
-- Future Claude/other realtime or text providers must be replaceable without changing tool/executor contracts.
+- [x] AgentCore does not import provider-specific event types.
+- [x] Orchestrator does not know OpenAI WebSocket/event names.
+- [x] Provider-specific session/auth handling stays in MacRuntime adapter code.
+- [x] Semantic/native tool contracts remain provider replaceable.
 
 ### Realtime model is not a direct tool executor
 
-The model may propose a structured capability/tool request. It does not call native Mac APIs itself.
-
-Every action must pass through:
+Every native action remains:
 
 ```text
 authenticated invocation
-→ orchestrator
-→ device routing
-→ policy/risk
-→ approval when required
+→ semantic capability validation
+→ orchestrator prepare
+→ trusted device routing
+→ risk/approval
 → executor
 → audit/result
 ```
 
+The model cannot mint approval, lower action risk, choose another tenant, or call native Mac APIs directly.
+
 ### Mac-first scope
 
-Windows remains deferred. This milestone targets the local authenticated Mac runtime first.
+Windows remains deferred. The first real executor slice is macOS only.
 
-### Text/control path before voice polish
+### Text/control before voice
 
-The architecture must support realtime voice, but correctness of the event/session/tool loop comes before UI/voice polish. A deterministic text/event harness must be able to test the same orchestrator path without microphone/audio dependencies.
+Text/control correctness is implemented and deterministically tested. Voice/audio remains a later layer over the same provider-neutral session/orchestration boundary.
 
-### No model-supplied identity
+## Realtime session layer
 
-Tenant/user/account/device authority comes from trusted session/runtime state. Provider/model event payloads cannot choose another principal or silently redirect execution to an unauthorized device.
+- [x] Provider-neutral `RealtimeModelProvider` / `RealtimeModelSession` contract.
+- [x] Typed input/output events independent of vendor wire format.
+- [x] Stable provider session + turn/event correlation IDs.
+- [x] Trusted interface/session/device context remains outside model payload authority.
+- [x] User text input in deterministic harness and Mac UI.
+- [ ] Audio input/output event boundaries — deferred to voice milestone.
+- [x] Assistant text events.
+- [x] Structured semantic tool-intent events.
+- [x] Structured typed tool-result return.
+- [x] Cancellation forwarding.
+- [x] Event text/tool-argument/tool-count/capability bounds.
+- [x] Provider event cannot authoritatively set tenant/user/account identity.
 
-### No model-supplied approval
+## Orchestrator loop
 
-Tool intents cannot grant their own approval or lower risk. Existing approval semantics remain authoritative.
+- [x] Realtime tool requests enter through AgentOrchestrator, not directly through MacRuntime.
+- [x] Role-appropriate realtime context compiles through ContextCompiler.
+- [x] Relevant long-term memory can be explicitly requested for realtime context.
+- [x] Bounded decision provider remains minimal/memory-free.
+- [x] Semantic intent is validated against locally registered capability mappings.
+- [x] Unknown/unadvertised capabilities fail closed.
+- [x] Explicit trusted device selection wins.
+- [x] Default local-device routing uses trusted session state, not model claims.
+- [x] Typed result/error returns to the provider session.
+- [x] Turn/event/request correlation IDs are preserved through the orchestration/result path.
 
-## Required implementation behavior
+## Mac executor: first completed vertical slice
 
-### Realtime session layer
+Read:
 
-- [ ] Add provider-neutral `RealtimeSession` / `RealtimeModelProvider` contract.
-- [ ] Define typed input/output event model independent of vendor wire format.
-- [ ] Carry stable session ID, correlation/turn ID, interface origin, and authenticated invocation context.
-- [ ] Support user text input in the deterministic harness.
-- [ ] Define audio input/output event boundaries without making audio required for core tests.
-- [ ] Support assistant text/transcript events.
-- [ ] Support structured capability/tool-intent events.
-- [ ] Support structured tool-result return to provider/session.
-- [ ] Support cancellation/interruption.
-- [ ] Bound event payload sizes and reject malformed events.
-- [ ] Ensure provider adapter cannot authoritatively set tenant/user/account identity.
+- [x] `ui.get_frontmost_app` via semantic `computer.inspect`.
+- [ ] `ui.get_windows` / bounded window inventory.
+- [ ] `process.list` bounded output.
+- [ ] `file.read` path/size policy.
 
-### Orchestrator loop
+Action:
 
-- [ ] Realtime requests enter through AgentOrchestrator, not directly through MacRuntime.
-- [ ] Orchestrator compiles role-appropriate context for the turn.
-- [ ] Relevant long-term memory may be selectively requested for reasoning/realtime context.
-- [ ] Bounded decision provider continues to receive minimal/memory-free context.
-- [ ] Structured model tool intent is validated against registered agent capabilities/tools.
-- [ ] Unknown/unadvertised tools fail closed.
-- [ ] Explicit device selection wins.
-- [ ] Default local-device routing uses trusted runtime state, not model claims.
-- [ ] Tool execution produces typed result/error back into the session.
-- [ ] Every turn/action carries correlation IDs through audit/result path.
-
-### Mac executor: first real capability slice
-
-Implement a small useful vertical slice rather than dozens of shallow tools.
-
-Initial read-only tools:
-
-- [ ] `ui.get_frontmost_app`.
-- [ ] `ui.get_windows` or equivalent bounded window inventory.
-- [ ] `process.list` with bounded output.
-- [ ] `file.read` with path/size policy.
-
-Initial action tools:
-
-- [ ] `app.open`.
-- [ ] `ui.click` using accessibility element targeting where possible.
+- [x] `app.open` via semantic `computer.open_app`.
+- [ ] `ui.click`.
 - [ ] `ui.type`.
-- [ ] `shell.run` only behind explicit policy/approval and bounded execution constraints.
+- [ ] `shell.run`.
 
-If an existing tool already implements part of this safely, integrate it instead of creating a parallel implementation.
+The first slice intentionally proves depth before adding a broad shallow tool catalog.
 
-### Native security requirements
+## Native security requirements
 
-- [ ] Accessibility permission checks remain explicit.
-- [ ] Screen-recording permission is requested only for capabilities that require it.
-- [ ] No camera/microphone permission is needed for deterministic control-loop tests.
-- [ ] Non-read actions preserve existing exact single-use approval semantics.
-- [ ] Tool arguments are immutable across approval/execution.
-- [ ] Approval cannot be replayed.
-- [ ] Shell/process execution has command/timeout/output bounds.
-- [ ] File reads are bounded and reject unsafe/unapproved scope when policy requires it.
-- [ ] Native executor errors are sanitized before being returned to model context.
-- [ ] Audit logs preserve action/result metadata without logging secrets unnecessarily.
+- [x] Accessibility permission checks remain explicit.
+- [x] Current inspect/open-app deterministic tests require no microphone/camera permission.
+- [x] Non-read action preserves exact single-use approval semantics.
+- [x] Tool name + canonical arguments + device + session are frozen before approval/execution.
+- [x] Approval replay is rejected.
+- [x] Native/provider errors used by the current slice are sanitized before model/user context.
+- [x] Existing audit boundary remains in the ToolRuntime execution path.
+- [ ] Screen-recording policy for future pixel tools.
+- [ ] Shell/process command/timeout/output bounds — tool not implemented yet.
+- [ ] File path/size policy — tool not implemented yet.
 
-### OpenAI Realtime adapter
+## OpenAI Realtime adapter
 
-- [ ] Add provider-specific adapter outside AgentCore.
-- [ ] Do not hard-code OpenAI into orchestrator/tool contracts.
-- [ ] Secrets come from trusted configuration/Keychain/environment boundary, never model context.
-- [ ] Adapter translates provider events into our typed realtime events.
-- [ ] Adapter translates tool results back to provider events.
-- [ ] Transport disconnect/reconnect does not duplicate committed actions.
-- [ ] Interrupted turns cannot replay already-consumed approval grants.
-- [ ] Live API testing must be explicitly bounded to avoid unnecessary credit spend.
+Provider-specific implementation lives outside AgentCore.
 
-### Testing
+- [x] Native WebSocket transport.
+- [x] Trusted bearer credential closure.
+- [x] `session.created` handshake gate.
+- [x] Text request/response translation.
+- [x] Provider-safe function-name mapping for semantic capability names.
+- [x] Function-call arguments → portable semantic intent.
+- [x] Typed tool result → provider `function_call_output`.
+- [x] Tool-call continuation before final response completion.
+- [x] Cancellation translation.
+- [x] Provider failure sanitization and response bounds.
+- [x] Fake-WebSocket deterministic adapter tests.
+- [ ] Live paid OpenAI Realtime canary.
+- [ ] Automatic reconnect/resume after broken transport.
+- [ ] Audio transport/turn UX.
 
-- [ ] Deterministic fake realtime provider drives a full user-turn → tool-intent → orchestrator → Mac executor/fake executor → tool-result → assistant-response loop.
-- [ ] Cross-tenant/provider event cannot change authenticated principal.
-- [ ] Model cannot execute unregistered capability.
-- [ ] Model cannot self-approve an action.
-- [ ] Model cannot change immutable arguments after approval.
-- [ ] Wrong-device/unadvertised-capability requests fail closed.
-- [ ] Duplicate provider event does not duplicate a committed action.
-- [ ] Cancellation stops pending execution where safe.
-- [ ] Context/memory trust labels survive realtime compilation.
-- [ ] Prompt-injection-shaped memory/external content cannot become approval.
-- [ ] Portable AgentCore CI passes.
-- [ ] Native macOS tests/app bundle pass.
-- [ ] Backend CI remains green if backend code is untouched; any backend changes require embedded + native PostgreSQL validation.
+## Short-lived Realtime credential broker
 
-## Definition of done
+Production credential flow:
 
-Do **not** mark this milestone complete because a websocket connects or because a model can emit a function call.
+```text
+Mac Keychain opaque agent session
+        ↓
+HTTPRealtimeCredentialClient
+        ↓
+POST /v1/realtime/credential
+        ↓
+backend agent_api.identity()
+        ↓
+server-side long-lived OpenAI key
+        ↓
+short-lived Realtime credential
+        ↓
+Mac OpenAIRealtimeProvider
+```
 
-It is complete only when:
+Implemented:
 
-1. a deterministic user turn enters a provider-neutral realtime session;
-2. the turn is bound to authenticated `TenantContext` and trusted interface/device state;
-3. the orchestrator compiles allowed context/memory;
-4. a structured tool intent is validated and routed through the existing policy/device boundary;
-5. at least one real native Mac read capability and one real native Mac action capability execute end-to-end;
-6. action approval semantics remain exact, single-use, and replay-safe;
-7. typed tool results return to the realtime session;
-8. duplicate/replayed provider events do not duplicate committed actions;
-9. cross-tenant/device canaries fail closed;
-10. portable tests pass;
-11. native macOS tests and app bundle pass;
-12. exact branch-head CI is green before merge;
-13. this source-of-truth and dedicated implementation doc are updated before merge.
+- [x] Mac does not require or persist the long-lived OpenAI API key.
+- [x] Backend derives internal principal from trusted opaque session only.
+- [x] Invalid/expired/revoked sessions fail before upstream provider call.
+- [x] Server-side provider request is bounded and sanitized.
+- [x] Mac credential client uses HTTPS/loopback restrictions, no redirects/cookies/cache and bounded responses/timeouts.
+- [x] Current Mac text UI checks Keychain agent session before enabling Send.
 
-After this milestone, expand the Mac capability surface and add voice/audio UX without changing the security/orchestration boundary.
+Still open:
+
+- [ ] Production backend endpoint deployment/configuration.
+- [ ] Consumer login flow that creates the Keychain agent session in the shipping app.
+- [ ] Live short-lived-credential → Realtime network canary.
+
+## Deterministic tests
+
+- [x] Fake realtime provider drives user turn → semantic intent → orchestrator → executor → typed result → assistant response.
+- [x] Provider event cannot choose authenticated principal.
+- [x] Trusted realtime memory retrieval uses exact `TenantContext`.
+- [x] Model cannot execute an unregistered/unadvertised capability.
+- [x] Model cannot self-approve an action.
+- [x] Approved native tool/arguments/device/session are immutable across prepare/execute.
+- [x] Wrong-device/unadvertised capability fails closed.
+- [x] Duplicate provider event does not duplicate committed action.
+- [x] Mismatched replay ID fails closed.
+- [x] Cancellation forwarding is tested.
+- [x] Context/memory trust labels survive realtime compilation.
+- [x] Actual MacRuntime read/action tool types are exercised behind the semantic loop.
+- [x] Short-lived Realtime credential client/broker error cases are tested.
+- [x] Backend embedded + native PostgreSQL gates pass on latest validated code head.
+- [x] Portable AgentCore gate passes on latest validated code head.
+- [x] Native macOS tests/app bundle pass on latest validated code head.
+
+## Definition of done for this first text/control slice
+
+The deterministic first slice is considered implemented because:
+
+1. a user text turn enters a provider-neutral realtime session;
+2. the turn is bound to trusted `TenantContext`, session/interface and local device state;
+3. the orchestrator compiles allowed context and opt-in memory;
+4. a semantic tool intent is validated and resolved locally;
+5. real native Mac read + action tool types execute end-to-end;
+6. write approval remains exact/single-use/replay-safe;
+7. typed results return to the realtime session;
+8. duplicate provider events cannot repeat a committed action;
+9. provider/model payloads have no authority to select another principal;
+10. portable/native/backend deterministic CI gates pass;
+11. the Mac has a user-visible text interface using the same path;
+12. long-lived model-provider credentials remain server-side in the production design.
+
+A live provider canary is intentionally a separate bounded validation step, not silently implied by deterministic completion.
 
 ---
 
@@ -533,12 +600,18 @@ Checklist:
 
 # 6. Agent-level capabilities vs executor tools
 
-Models should reason primarily in semantic agent-level capabilities, while native implementation details remain in device adapters.
+Models reason primarily in semantic agent-level capabilities; native implementation names remain behind trusted local resolution.
 
-Agent-level examples:
+Implemented first slice:
 
 ```text
-computer.inspect
+computer.inspect  → ui.get_frontmost_app
+computer.open_app → app.open
+```
+
+Future semantic examples:
+
+```text
 computer.interact
 project.inspect
 project.run
@@ -549,7 +622,7 @@ job.start
 job.status
 ```
 
-Executor examples:
+Native executor examples:
 
 ```text
 ui.get_frontmost_app
@@ -566,10 +639,12 @@ screen.capture
 
 Checklist:
 
-- [ ] Agent-level capability schema — active milestone begins this layer.
-- [ ] Translation from semantic capability to executor steps.
-- [ ] Capability narrowing per turn.
-- [ ] Keep OS-specific implementation names out of portable provider contracts.
+- [x] Agent-level capability schema for first slice.
+- [x] Translation from semantic capability to native executor request.
+- [x] Capability narrowing to the selected device per turn.
+- [x] OS-specific implementation names stay out of portable provider contracts.
+- [ ] Expand semantic capability catalog beyond inspect/open-app.
+- [ ] Multi-step semantic capability planning.
 
 ---
 
@@ -632,6 +707,7 @@ Implemented:
 - [x] Model-specific policies.
 - [x] Trust-label preservation.
 - [x] Memory retrieval/injection with scope/provenance enforcement.
+- [x] Realtime coordinator uses the authenticated compiler path.
 
 Still open:
 
@@ -646,9 +722,9 @@ Still open:
 
 # 9. Context trust and prompt-injection boundary
 
-Context is data unless it is explicitly trusted as an instruction source.
+Context is data unless explicitly trusted as an instruction source.
 
-Trust classes include:
+Trust classes:
 
 ```text
 user_instruction
@@ -665,12 +741,13 @@ Implemented:
 - [x] Context Compiler preserves trust.
 - [x] Bounded decisions default to curated state and exclude memory by default.
 - [x] Memory-shaped prompt injection remains `memory`, not instruction.
+- [x] Realtime semantic tool events have no approval/identity authority fields.
+- [x] Local approval is issued only after trusted resolution/preparation of the native action.
 
 Still required:
 
 - [ ] End-to-end webpage/email/document prompt-injection tests through a live model path.
-- [ ] Prove external content cannot grant approval.
-- [ ] Prove realtime provider events cannot grant approval.
+- [ ] Live-provider adversarial prompt-injection canary.
 
 ---
 
@@ -700,10 +777,11 @@ Implemented:
 - [x] Revision-fenced mutation coordinator.
 - [x] Live-canary harness + offline tests.
 - [x] Selective Memory → Context Compiler integration.
+- [x] Realtime compilation can consume memory through the same provider-neutral boundary.
 
 Still open:
 
-- [ ] Successful authenticated live vendor canary from reachable network.
+- [ ] Successful authenticated live Supermemory vendor canary from reachable network.
 - [ ] Proven vendor lifecycle/deletion guarantees.
 - [ ] Production provider mutations.
 - [ ] Provider migration pipeline/dual-write/shadow-read.
@@ -729,14 +807,16 @@ Implemented:
 - [x] Context-store/compiler isolation.
 - [x] Memory → Context cross-tenant canaries.
 - [x] Backend cache isolation.
+- [x] Realtime model tool-intent schema carries no tenant/user/account authority.
+- [x] Realtime memory compilation test proves trusted principal is supplied by the invocation path.
+- [x] Realtime credential broker derives identity from the opaque authenticated server session.
 
 Still required:
 
-- [ ] Live semantic/provider-backed isolation.
+- [ ] Live semantic/provider-backed isolation canary.
 - [ ] Tenant-scoped jobs.
 - [ ] Tenant-scoped artifacts.
 - [ ] Production logging/backup policy.
-- [ ] Realtime/tool-event cross-tenant isolation — active milestone.
 
 ---
 
@@ -771,13 +851,14 @@ Implemented foundation:
 - [x] Memory is compiled with `memory` trust.
 - [x] Bounded decision path stays memory-free.
 - [x] Cross-tenant memory cannot enter another principal's context.
+- [x] Realtime memory is injected only as `memory` context under trusted principal/scope.
+- [x] Semantic tool intents cannot include or mint approval grants.
+- [x] Native action risk comes from the local ToolDescriptor, not memory/model output.
+- [x] Exact native action is frozen before local approval.
 
-Active milestone must prove:
+Still required:
 
-- [ ] Memory cannot approve a Mac action.
-- [ ] Memory cannot change tool/device identity.
-- [ ] Memory cannot lower action risk.
-- [ ] Provider/model event cannot reinterpret memory as approval.
+- [ ] Live-model adversarial canary proving memory/external content cannot socially induce an unintended approval UI flow without current user intent.
 
 ---
 
@@ -785,7 +866,7 @@ Active milestone must prove:
 
 Rules:
 
-- explicit device reference wins;
+- explicit trusted device reference wins;
 - trusted active-device defaults may resolve simple contextual requests;
 - ambiguous non-read actions must not be silently guessed;
 - high-impact ambiguity should ask;
@@ -798,13 +879,15 @@ Implemented:
 - [x] Unknown-device rejection.
 - [x] Unadvertised-capability rejection.
 - [x] Deterministic explicit-device path.
+- [x] Realtime capability catalog narrows to selected device capabilities.
+- [x] Local Mac active-device resolution in the first desktop slice.
 
 Still open:
 
-- [ ] Trusted active-device state end-to-end — active milestone for local Mac.
 - [ ] Human-readable aliases.
 - [ ] Presence/heartbeat.
 - [ ] Multi-device ambiguity UX.
+- [ ] Remote-device gateway.
 
 ---
 
@@ -819,15 +902,17 @@ Implemented:
 - [x] Expiry.
 - [x] Single-use consumption.
 - [x] Replay rejection.
-- [x] Default deny-all approvals in current Mac composition root.
+- [x] Default deny-all approval behavior when no trusted provider exists.
+- [x] Trusted local Mac `Allow Once` / `Deny` approval UI for realtime actions.
+- [x] Realtime action cannot execute without a trusted grant.
+- [x] Realtime duplicate event reuses the prior typed result rather than re-executing.
+- [x] Mismatched replay fails closed.
 
 Still open:
 
-- [ ] Trusted local approval UI.
 - [ ] Cross-interface approval UX.
-- [ ] Semantic-effect risk escalation.
-- [ ] Correlation across realtime/orchestrator/device/audit — active milestone.
-- [ ] End-to-end realtime test proving model cannot bypass approval — active milestone.
+- [ ] Semantic-effect risk escalation beyond native descriptor risk.
+- [ ] Remote-device approval handoff.
 
 ---
 
@@ -843,14 +928,21 @@ Rules:
 - secrets and raw provider credentials never enter model context;
 - native errors/logs are sanitized.
 
-Checklist:
+Implemented:
 
-- [ ] Provider-specific minimization policy.
-- [ ] Secret redaction policy.
-- [ ] Provider request audit metadata without raw secrets.
-- [ ] Privacy/retention policy.
 - [x] Explicit memory-context count/byte budgets.
-- [ ] Realtime event/context payload budgets — active milestone.
+- [x] Realtime text/tool argument/tool count/capability bounds.
+- [x] Provider-facing realtime context omits tenant/user/account identity.
+- [x] Native executor names are hidden behind semantic capability mapping.
+- [x] Long-lived OpenAI API key remains server-side in the production Realtime credential design.
+- [x] Realtime provider/client errors are sanitized for current paths.
+
+Still open:
+
+- [ ] Complete provider-specific minimization matrix for every future provider.
+- [ ] General secret-redaction framework across all future tools/logs.
+- [ ] Provider request audit metadata policy without raw secrets.
+- [ ] Product privacy/retention policy.
 
 ---
 
@@ -871,19 +963,22 @@ Current status:
 11. [x] Portable canonical v3 export.
 12. [ ] Provider migration/dual-write/shadow read.
 13. [ ] Shared workspace/ACL when required.
-14. [ ] **Realtime session + agent-level capability/tool loop + first real Mac executor slice — current active milestone.**
-15. [ ] Job Manager.
-16. [ ] Broader Mac capability surface.
-17. [ ] Mobile/desktop interface expansion.
-18. [ ] Voice/audio polish.
-19. [ ] Future glasses integration.
-20. [ ] Windows executor — deferred for current phase.
+14. [x] **Realtime text session + semantic capability loop + first real Mac read/action slice.**
+15. [ ] Bounded live Realtime provider canary + reconnect hardening.
+16. [ ] Job Manager.
+17. [ ] Broader Mac capability surface (`windows/process/file/click/type/shell/screen`).
+18. [ ] Production auth/backend deployment and consumer login UX.
+19. [ ] Mobile/desktop interface expansion.
+20. [ ] Voice/audio UX.
+21. [ ] Future glasses integration.
+22. [ ] Windows executor — deferred for current phase.
 
-Security milestones already completed:
+Security milestones completed:
 
 - [x] Provider-neutral authentication/session foundation.
 - [x] Canonical PostgreSQL memory bridge.
 - [x] Memory → Context Compiler integration.
+- [x] Exact local realtime action approval/replay boundary for first Mac slice.
 
 ---
 
@@ -897,13 +992,13 @@ Overall completion requires:
 - [ ] cross-tenant isolation is proven through every production retrieval/execution path;
 - [ ] provider replacement can occur without losing canonical memory;
 - [ ] deletion cannot resurrect data through provider/migration/cache/index;
-- [ ] context compilation remains selective/freshness/provenance aware;
+- [ ] context compilation remains selective/freshness/provenance aware across production paths;
 - [ ] realtime, bounded, and reasoning models receive role-appropriate context;
 - [ ] memory never becomes instruction/authority;
 - [ ] one agent session can continue across desktop and mobile;
 - [ ] jobs can be started on one interface and observed from another;
 - [ ] phone-only mode works;
-- [ ] direct desktop mode works;
+- [ ] direct desktop mode works with production auth/backend/model configuration;
 - [ ] glasses act as another interface to the same agent;
 - [ ] approval/security boundaries cannot be bypassed by models, memory, or external content;
 - [ ] provider-specific dependencies remain replaceable;
@@ -929,4 +1024,4 @@ Until then, this file remains the active architecture and implementation checkli
 - `docs/SUPERMEMORY_ADAPTER.md` — Supermemory adapter contract/capabilities.
 - `docs/SUPERMEMORY_LIVE_VALIDATION.md` — bounded live-canary procedure.
 - `docs/VALIDATION.md` — repository validation expectations/history.
-- `docs/REALTIME_ORCHESTRATOR_MAC_CONTROL.md` — active realtime/orchestrator/Mac-control milestone.
+- `docs/REALTIME_ORCHESTRATOR_MAC_CONTROL.md` — implemented deterministic text-control milestone and remaining live/voice hardening.
