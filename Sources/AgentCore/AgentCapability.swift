@@ -39,6 +39,7 @@ public enum AgentCapabilityResolutionError: Error, Sendable, Equatable {
 
 public protocol AgentCapabilityResolving: Sendable {
     func catalog() -> [AgentCapabilityDescriptor]
+    func executorTool(for capability: String) throws -> String
     func resolve(name: String, arguments: JSONValue) throws -> ResolvedAgentCapability
 }
 
@@ -72,6 +73,17 @@ public struct DefaultAgentCapabilityRegistry: AgentCapabilityResolving {
                 ])
             )
         ]
+    }
+
+    public func executorTool(for capability: String) throws -> String {
+        switch capability {
+        case "computer.inspect":
+            return "ui.get_frontmost_app"
+        case "computer.open_app":
+            return "app.open"
+        default:
+            throw AgentCapabilityResolutionError.unknownCapability(capability)
+        }
     }
 
     public func resolve(name: String, arguments: JSONValue) throws -> ResolvedAgentCapability {
