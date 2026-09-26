@@ -8,10 +8,14 @@ var targets: [Target] = [
 ]
 
 #if os(macOS)
-products += [.executable(name: "MacAgent", targets: ["MacAgent"])]
+products += [
+    .executable(name: "MacAgent", targets: ["MacAgent"]),
+    .executable(name: "RealtimeLiveCanary", targets: ["RealtimeLiveCanary"])
+]
 targets += [
     .target(name: "MacRuntime", dependencies: ["AgentCore"]),
     .executableTarget(name: "MacAgent", dependencies: ["AgentCore", "MacRuntime"]),
+    .executableTarget(name: "RealtimeLiveCanary", dependencies: ["AgentCore", "MacRuntime"]),
     .testTarget(name: "MacRuntimeTests", dependencies: ["AgentCore", "MacRuntime"])
 ]
 #endif
