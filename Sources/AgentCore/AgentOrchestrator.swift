@@ -56,10 +56,11 @@ public enum OrchestrationError: Error, Sendable, Equatable {
     case deviceSelectionRequired(tool: String, candidateDeviceIDs: [UUID])
     case inconsistentCapabilityRisk(String)
     case invalidDeviceDecision(String)
+    case contextCompilerUnavailable
 }
 
-/// Coordinates session context and device routing without knowing how a platform
-/// implements any capability. Model/provider adapters remain outside this type.
+/// Coordinates authenticated context compilation, session state and device
+/// routing without knowing how a platform or model provider implements them.
 public struct AgentOrchestrator: Sendable {
     private let devices: DeviceRouter
     private let decisions: DecisionEngine
@@ -71,6 +72,22 @@ public struct AgentOrchestrator: Sendable {
         self.devices = devices
         self.decisions = decisions
         self.contextCompiler = contextCompiler
+    }
+
+    /// Single authenticated model-context boundary. Future realtime/reasoning
+    /// adapters call the orchestrator, which delegates to the configured compiler.
+    /// Tenant identity remains outside model-generated requests.
+    public func compileContext(_ request: ContextCompilationRequest,
+                               in invocation: AgentInvocationContext,
+                               now: Date = Date()) async throws -> CompiledContext {
+        guard let contextCompiler else {
+            throw OrchestrationError.contextCompilerUnavailable
+        }
+        return try await contextCompiler.compile(
+            request,
+            as: invocation.principal,
+            now: now
+        )
     }
 
     /// Compatibility path for callers that have not yet been upgraded to carry
