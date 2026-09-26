@@ -10,7 +10,11 @@ Do **not** mark an item `[x]` because a type, interface, placeholder, mock, or p
 
 The purpose of this document is to prevent shallow implementations that technically satisfy a name while missing the intended product behavior, isolation, migration, or security guarantees.
 
-Latest checkpoint (2026-09-24, backend isolation): `core/backend-isolation` adds the repository's first PostgreSQL-backed storage API in `backend/`. It derives tenant/user/optional-account identity from opaque server-issued sessions, enforces ENABLE + FORCE RLS with a separate non-owner mutation role, rejects request-supplied identities, and prevents runtime access to session issuance/private session tables. Memory records are immutable; reads, writes, deletions, tombstones and paged exports are principal-scoped. The HTTP boundary, PostgreSQL transaction adapter and separate trusted session issuer are implemented.
+Latest checkpoint (2026-09-26, backend isolation follow-up): verified and restored the existing `core/backend-isolation` / PR #13 source at `d77e6d2` before extending it. Added `002_cache_revalidation.sql`: cached IDs are rechecked for principal, scope, lexical query and requested result limit. Added direct-RLS checks on all auxiliary tables and verified replacement-function ownership/grants. The native CI job now requires its database configuration explicitly, preventing silent fallback to embedded tests. Local result: **31 passed, 0 failed, 3 native-only tests skipped**. The 22 existing offline Supermemory harness tests also pass; Swift sources are unchanged and were not rerun locally.
+
+GitHub Actions retries were accepted on 2026-09-26 for macOS (`35961939486`), portable core (`35961939424`) and backend (`35963786877`), but all failed before executing any job steps. Check-run annotations are inaccessible to the connection (403); the billing restriction cannot be confirmed or declared resolved from these results. Native PostgreSQL and macOS validation remain pending. Supermemory testing remains paused. No cloud database was deployed, and full identity-provider / Swift canonical-ledger integration remains open.
+
+Previous checkpoint (2026-09-24, backend isolation): `core/backend-isolation` adds the repository's first PostgreSQL-backed storage API in `backend/`. It derives tenant/user/optional-account identity from opaque server-issued sessions, enforces ENABLE + FORCE RLS with a separate non-owner mutation role, rejects request-supplied identities, and prevents runtime access to session issuance/private session tables. Memory records are immutable; reads, writes, deletions, tombstones and paged exports are principal-scoped. The HTTP boundary, PostgreSQL transaction adapter and separate trusted session issuer are implemented.
 
 The working lexical retrieval cache is partitioned by principal, scope, query and limit. Cache entries hold only IDs, expire, and are bounded per principal. Writes/deletes invalidate the cache and advance its revision in the same transaction; principal-scoped advisory locking coordinates population with deletion. Results are re-resolved under RLS and scope checks.
 
@@ -1304,6 +1308,7 @@ Run these tests across:
 - [x] Context-compiler isolation tests.
 - [ ] Cache isolation tests.
 - [x] Backend cache isolation, poisoned-ID re-resolution, deletion invalidation, expiry/revocation and bounded eviction tests (2026-09-24).
+- [x] Cached-candidate query/limit revalidation, auxiliary-table RLS checks and mandatory native CI configuration (2026-09-26).
 - [ ] Job isolation tests.
 - [ ] Migration isolation tests.
 - [ ] Export isolation tests.

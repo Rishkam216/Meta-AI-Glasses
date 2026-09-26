@@ -259,3 +259,41 @@ test('native revocation waits for an already authenticated transaction then deni
   finally { release(); await active; await revocation; }
   await assert.rejects(run(0,'identity'),code('unauthenticated'));
 });
+
+test('cached candidates must still match the requested query and result limit',async () => {
+  const matching=[];
+  for(let i=0;i<3;i++) matching.push(await remember(0,randomUUID(),'MATCHING-CANARY'));
+  const irrelevant=await remember(0,randomUUID(),'UNRELATED-PRIVATE-FACT');
+  await run(0,'search',{query:'MATCHING-CANARY',scope:{kind:'user'},limit:1});
+  await asSession(db.writer,tokens[0],tx=>tx.query(
+    'UPDATE agent_data.retrieval_cache SET memory_ids=$1::uuid[]',[[irrelevant,...matching]]));
+  const hits=await run(0,'search',{query:'MATCHING-CANARY',scope:{kind:'user'},limit:1});
+  assert.equal(hits.length,1); assert.equal(hits[0].content,'MATCHING-CANARY');
+  await asSession(db.writer,tokens[0],tx=>tx.query(
+    'UPDATE agent_data.retrieval_cache SET memory_ids=$1::uuid[]',[[irrelevant]]));
+  assert.deepEqual(await run(0,'search',{query:'MATCHING-CANARY',scope:{kind:'user'},limit:1}),[]);
+});
+
+test('all auxiliary tables filter out other principals without application predicates',async () => {
+  for(let i=0;i<5;i++) {
+    await remember(i); const removed=await remember(i); await run(i,'forget',{id:removed});
+    await run(i,'search',{query:'CANARY',scope:{kind:'user'}});
+  }
+  for(let i=0;i<5;i++) await asSession(db.runtime,tokens[i],async tx=>{
+    const principal=(await tx.query('SELECT agent_private.current_principal() AS p')).rows[0].p;
+    for(const table of ['memories','tombstones','revisions','retrieval_cache']) {
+      const result=await tx.query('SELECT principal_id FROM agent_data.'+table);
+      assert(result.rows.length>0,table+' positive control');
+      assert(result.rows.every(row=>row.principal_id===principal),table+' ownership');
+    }
+  });
+});
+
+test('cache replacement migration retains restricted function ownership and execution rights',async () => {
+  const fn=(await db.admin.query(`SELECT pg_get_userbyid(proowner) AS owner, prosecdef,
+    has_function_privilege('agent_runtime',oid,'EXECUTE') AS runtime_access,
+    has_function_privilege('agent_auth',oid,'EXECUTE') AS auth_access
+    FROM pg_proc WHERE oid='agent_api.search_memories(text,text,text,integer)'::regprocedure`)).rows[0];
+  assert.equal(fn.owner,'agent_writer'); assert.equal(fn.prosecdef,true);
+  assert.equal(fn.runtime_access,true); assert.equal(fn.auth_access,false);
+});

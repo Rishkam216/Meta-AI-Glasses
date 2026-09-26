@@ -1,13 +1,17 @@
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { PostgresTransactions } from '../src/database.mjs';
 
 export async function createTestDatabase() {
-  const migration = await readFile(new URL('../sql/001_isolation.sql', import.meta.url), 'utf8');
+  if (process.env.REQUIRE_NATIVE_POSTGRES === '1' && !process.env.TEST_POSTGRES_URL)
+    throw new Error('native_postgres_configuration_required');
+  const directory = new URL('../sql/', import.meta.url);
+  const names = (await readdir(directory)).filter(name => /^\d{3}_.*\.sql$/.test(name)).sort();
+  const migrations = await Promise.all(names.map(name => readFile(new URL(name, directory), 'utf8')));
   if (!process.env.TEST_POSTGRES_URL) {
     const db = await PGlite.create();
-    await db.exec(migration);
+    for (const migration of migrations) await db.exec(migration);
     const role = name => ({ transaction: work => db.transaction(async tx => {
       await tx.exec(`SET LOCAL ROLE ${name}`); return work(tx);
     }) });
@@ -20,7 +24,7 @@ export async function createTestDatabase() {
   if (!['localhost','127.0.0.1','[::1]'].includes(url.hostname) || url.pathname !== '/agent_isolation_test')
     throw new Error('disposable_local_test_database_required');
   const adminPool = new pg.Pool({ connectionString: url.href });
-  await adminPool.query(migration);
+  for (const migration of migrations) await adminPool.query(migration);
   await adminPool.query("ALTER ROLE agent_runtime LOGIN PASSWORD 'test-runtime-only'; ALTER ROLE agent_auth LOGIN PASSWORD 'test-auth-only'");
   const pool = (role, password) => {
     const u = new URL(url); u.username = role; u.password = password;

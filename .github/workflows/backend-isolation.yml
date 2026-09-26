@@ -48,4 +48,5 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
         env:
+          REQUIRE_NATIVE_POSTGRES: '1'
           TEST_POSTGRES_URL: postgres://postgres:disposable-ci-only@127.0.0.1:5432/agent_isolation_test

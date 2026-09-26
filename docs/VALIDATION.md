@@ -171,3 +171,27 @@ Therefore the project is **portable-core verified at recorded milestones, native
 
 After this gate passes, `ui.get_windows` remains the next native read-only tool. Before the first mutating tool, wire a trusted local approval UI to `ApprovalStore`.
 
+
+
+## 2026-09-26 — backend isolation follow-up and CI retry
+
+Restored existing PR #13 at `d77e6d2`; the local baseline tree exactly matched
+GitHub tree `43db339dcdd051748ec76ec4450f347b643ececd`. Earlier scratch work from
+the stale PR #12 snapshot was not included in this change.
+
+- Existing Node backend baseline: 27 passed, zero failures, 3 native-only skips.
+- Final backend suite: 31 passed, zero failures, 3 native-only skips (PGlite).
+- New checks: cached IDs must match query/limit; all four tables isolate raw
+  selects; function replacement retains writer ownership/restricted grants;
+  required native database configuration fails closed when missing.
+- Existing offline Supermemory canary suite: 22 passed, no vendor requests.
+- Swift source unchanged; no new local Swift/macOS validation claimed.
+- Retried GitHub Actions runs 35961939486 (macOS), 35961939424 (portable core)
+  and 35963786877 (backend). Each was accepted, then failed with no executed
+  steps. Check-run annotation API returned 403; detailed cause remains unknown.
+  This does not establish a test failure or a resolved billing restriction.
+
+Migration 002 is additive to deployment history; run 001 only for a new database,
+then 002. It preserves the existing function's owner and execution grants.
+Native login/concurrency tests and real identity-provider/full Swift ledger
+integration remain required before end-to-end cloud isolation is complete.

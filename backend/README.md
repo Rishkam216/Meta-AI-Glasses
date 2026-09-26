@@ -24,8 +24,10 @@ and connections. Do not report that gate passed until its result is observed.
 
 For native local testing, supply `TEST_POSTGRES_URL` through a private environment
 to an administrator of a **new disposable PostgreSQL cluster**, using the database
-name `agent_isolation_test` on loopback. `npm test` then applies the same migration
-and configures disposable runtime/authentication logins. The fixture refuses other
+name `agent_isolation_test` on loopback. `REQUIRE_NATIVE_POSTGRES=1 npm test` then applies all numbered migrations
+and configures disposable runtime/authentication logins. The native CI job sets
+`REQUIRE_NATIVE_POSTGRES=1`, so missing database configuration is a hard failure
+instead of a fallback to the embedded engine. The fixture refuses other
 hosts/database names and fails if its roles already exist. Never point it at a
 shared or production database. Roles are cluster-wide, not database-local.
 
@@ -94,7 +96,9 @@ Search is literal, case-insensitive substring retrieval, **not semantic/vector
 retrieval**. SQL parameters are bound. Cache keys include principal plus a digest
 of scope kind, scope reference, exact query and limit; entries include the ledger
 revision, expire after 30 seconds and are capped at 128 per principal. Only UUIDs
-are cached. Hits are re-resolved under RLS and the requested scope.
+are cached. Hits are re-resolved under RLS, the requested scope, the lexical
+query and the requested result limit. Corrupted candidates cannot introduce an
+unrelated same-user memory or exceed the caller's bound.
 
 Writes/deletes and cache population take the same principal-scoped transaction
 advisory lock. Triggers increment the revision and invalidate that principal's
@@ -108,8 +112,11 @@ v3 or a point-in-time disaster-recovery snapshot. Do not import it as such.
 
 ## Local server / deployment gate
 
-For a dedicated database, an administrator applies `sql/001_isolation.sql` once,
-with `psql -v ON_ERROR_STOP=1`. The migration creates non-login roles; provision
+For a dedicated database, an administrator applies each numbered SQL migration
+in order, with `psql -v ON_ERROR_STOP=1`. Apply `001_isolation.sql` once to a fresh
+database, then `002_cache_revalidation.sql`. Existing installations apply only
+`002`; it replaces the search function while preserving its writer ownership and
+execution grants. The migration creates non-login roles; provision
 private passwords and enable LOGIN only for `agent_runtime` and, in a separate
 trusted authentication process, `agent_auth`. Never grant runtime membership in
 the other roles. Do not put database credentials in Git or request payloads.
@@ -152,3 +159,14 @@ Primary references reviewed 2026-09-24:
 - https://node-postgres.com/features/transactions
 - https://node-postgres.com/features/ssl
 - https://pglite.dev/docs/api
+
+## 2026-09-26 validation follow-up
+
+The local suite passes 31 tests, with zero failures and three native-only tests
+skipped. It includes cache relevance/limit revalidation, auxiliary-table RLS,
+function ownership/grant preservation and fail-closed native configuration.
+GitHub Actions retries for macOS, portable core and the backend were accepted
+but failed before any steps ran. The API connection cannot retrieve check-run
+annotations (403), so billing is suspected from prior history, not confirmed by
+this retry. No native PostgreSQL or macOS pass is claimed. No Supermemory API
+request was made in this follow-up.
