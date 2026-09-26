@@ -122,6 +122,19 @@ public struct AgentOrchestrator: Sendable {
         )
     }
 
+    /// Returns executor tools actually advertised by trusted device state. A
+    /// realtime provider receives semantic capabilities filtered through this set,
+    /// never an invented model-side tool list.
+    public func availableExecutorTools(in invocation: AgentInvocationContext,
+                                       explicitDeviceID: UUID? = nil) async throws -> Set<String> {
+        if let deviceID = explicitDeviceID ?? invocation.session.activeDeviceID {
+            let snapshot = try await devices.snapshot(for: deviceID)
+            return Set(snapshot.capabilities.map(\.name))
+        }
+        let snapshots = await devices.snapshots()
+        return Set(snapshots.flatMap { $0.capabilities.map(\.name) })
+    }
+
     /// Resolves one exact device/capability binding without executing it. This is
     /// the handoff point for a trusted approval UI on non-read actions.
     public func prepare(_ intent: ToolIntent,
