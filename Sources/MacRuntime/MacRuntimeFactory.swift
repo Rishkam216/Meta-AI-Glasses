@@ -37,6 +37,25 @@ public enum MacRuntimeFactory {
         )
     }
 
+    /// Production path: the Mac presents only our Keychain-backed opaque agent
+    /// session to our backend. The backend mints a short-lived Realtime secret;
+    /// the standard OpenAI API key never reaches the Mac process.
+    public static func makeAuthenticatedOpenAIRealtimeProvider(
+        credentialEndpoint: URL,
+        credentialStore: KeychainAgentSessionStore,
+        model: String = "gpt-realtime-2.1"
+    ) throws -> OpenAIRealtimeProvider {
+        let client = try HTTPRealtimeCredentialClient(
+            endpoint: credentialEndpoint,
+            expectedModel: model
+        ) {
+            try await credentialStore.bearerToken()
+        }
+        return try makeOpenAIRealtimeProvider(model: model) {
+            try await client.credential()
+        }
+    }
+
     /// Production remains deny-by-default until a trusted local approval UI is
     /// wired. Tests or the future app composition root may inject ApprovalStore.
     public static func make(approvals: any ApprovalAuthorizing = DenyAllApprovals()) async throws -> ToolRuntime {
