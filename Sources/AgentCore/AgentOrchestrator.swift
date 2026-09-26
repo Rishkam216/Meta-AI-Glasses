@@ -51,6 +51,38 @@ public struct ToolIntent: Codable, Sendable, Equatable {
     }
 }
 
+/// Immutable, trusted result of device/capability resolution. Approval UI can
+/// inspect this exact binding, but cannot change it after a grant is issued.
+public struct PreparedToolExecution: Sendable {
+    public let requestID: UUID
+    public let tool: String
+    public let arguments: JSONValue
+    public let descriptor: ToolDescriptor
+    public let context: RequestContext
+
+    init(requestID: UUID,
+         tool: String,
+         arguments: JSONValue,
+         descriptor: ToolDescriptor,
+         context: RequestContext) {
+        self.requestID = requestID
+        self.tool = tool
+        self.arguments = arguments
+        self.descriptor = descriptor
+        self.context = context
+    }
+
+    public func request(approvalID: UUID? = nil) -> ToolRequest {
+        ToolRequest(
+            id: requestID,
+            tool: tool,
+            arguments: arguments,
+            context: context,
+            approvalID: approvalID
+        )
+    }
+}
+
 public enum OrchestrationError: Error, Sendable, Equatable {
     case noCapableDevice(String)
     case deviceSelectionRequired(tool: String, candidateDeviceIDs: [UUID])
@@ -90,12 +122,38 @@ public struct AgentOrchestrator: Sendable {
         )
     }
 
+    /// Resolves one exact device/capability binding without executing it. This is
+    /// the handoff point for a trusted approval UI on non-read actions.
+    public func prepare(_ intent: ToolIntent,
+                        in invocation: AgentInvocationContext,
+                        requestID: UUID = UUID()) async throws -> PreparedToolExecution {
+        try await prepare(
+            intent,
+            session: invocation.session,
+            invocation: invocation,
+            requestID: requestID
+        )
+    }
+
+    /// Executes only the already-resolved immutable request. The device runtime
+    /// still validates the approval against its live descriptor before execution.
+    public func execute(_ prepared: PreparedToolExecution,
+                        approvalID: UUID? = nil) async throws -> ToolResult {
+        try await devices.route(prepared.request(approvalID: approvalID))
+    }
+
     /// Compatibility path for callers that have not yet been upgraded to carry
     /// authenticated tenant context. It intentionally does not compile stored
     /// context into model decisions.
     public func execute(_ intent: ToolIntent,
                         in session: AgentSession) async throws -> ToolResult {
-        try await execute(intent, session: session, invocation: nil)
+        let prepared = try await prepare(
+            intent,
+            session: session,
+            invocation: nil,
+            requestID: UUID()
+        )
+        return try await execute(prepared, approvalID: intent.approvalID)
     }
 
     /// Preferred context-aware path. Tenant identity is supplied separately from
@@ -103,20 +161,36 @@ public struct AgentOrchestrator: Sendable {
     /// context partition.
     public func execute(_ intent: ToolIntent,
                         in invocation: AgentInvocationContext) async throws -> ToolResult {
-        try await execute(intent, session: invocation.session, invocation: invocation)
+        let prepared = try await prepare(intent, in: invocation)
+        return try await execute(prepared, approvalID: intent.approvalID)
     }
 
-    private func execute(_ intent: ToolIntent,
+    private func prepare(_ intent: ToolIntent,
                          session: AgentSession,
-                         invocation: AgentInvocationContext?) async throws -> ToolResult {
+                         invocation: AgentInvocationContext?,
+                         requestID: UUID) async throws -> PreparedToolExecution {
+        let deviceID = try await resolveDeviceID(
+            for: intent,
+            session: session,
+            invocation: invocation
+        )
+        let descriptor = try await devices.descriptor(for: intent.tool, on: deviceID)
+        return PreparedToolExecution(
+            requestID: requestID,
+            tool: intent.tool,
+            arguments: intent.arguments,
+            descriptor: descriptor,
+            context: RequestContext(deviceID: deviceID, sessionID: session.id)
+        )
+    }
+
+    private func resolveDeviceID(for intent: ToolIntent,
+                                 session: AgentSession,
+                                 invocation: AgentInvocationContext?) async throws -> UUID {
         if let explicitDeviceID = intent.explicitDeviceID {
-            return try await devices.route(
-                tool: intent.tool,
-                arguments: intent.arguments,
-                to: explicitDeviceID,
-                sessionID: session.id,
-                approvalID: intent.approvalID
-            )
+            // descriptor(for:on:) in prepare() performs the authoritative
+            // capability check for explicit devices.
+            return explicitDeviceID
         }
 
         let candidates = await devices.candidates(for: intent.tool)
@@ -126,23 +200,11 @@ public struct AgentOrchestrator: Sendable {
 
         if let activeDeviceID = session.activeDeviceID,
            candidates.contains(where: { $0.identity.id == activeDeviceID }) {
-            return try await devices.route(
-                tool: intent.tool,
-                arguments: intent.arguments,
-                to: activeDeviceID,
-                sessionID: session.id,
-                approvalID: intent.approvalID
-            )
+            return activeDeviceID
         }
 
         if candidates.count == 1 {
-            return try await devices.route(
-                tool: intent.tool,
-                arguments: intent.arguments,
-                to: candidates[0].identity.id,
-                sessionID: session.id,
-                approvalID: intent.approvalID
-            )
+            return candidates[0].identity.id
         }
 
         let risks = Set(candidates.compactMap { snapshot in
@@ -211,13 +273,9 @@ public struct AgentOrchestrator: Sendable {
         guard let selectedID = UUID(uuidString: decision.decision.selectedOptionID) else {
             throw OrchestrationError.invalidDeviceDecision(decision.decision.selectedOptionID)
         }
-
-        return try await devices.route(
-            tool: intent.tool,
-            arguments: intent.arguments,
-            to: selectedID,
-            sessionID: session.id,
-            approvalID: intent.approvalID
-        )
+        guard candidateIDs.contains(selectedID) else {
+            throw OrchestrationError.invalidDeviceDecision(decision.decision.selectedOptionID)
+        }
+        return selectedID
     }
 }
