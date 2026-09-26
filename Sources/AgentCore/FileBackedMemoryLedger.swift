@@ -140,7 +140,9 @@ public actor FileBackedMemoryLedger: MemoryServiceLedger {
 }
 
 /// All operations are synchronous and hold the advisory lock without suspension.
-/// Directory-relative syscalls pin the directory and refuse symlink traversal.
+/// Directory-relative syscalls pin the directory and refuse user-controlled
+/// symlink traversal. On Darwin, root-owned system aliases such as /var are the
+/// only symlink components that may be followed.
 /// The lock file must never be unlinked while this store is in use.
 final class LockedMemoryFile: Sendable {
     private let directoryFD: Int32
@@ -159,12 +161,13 @@ final class LockedMemoryFile: Sendable {
         var fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard fd >= 0 else { throw MemoryPersistenceError.ioFailure }
         do {
+            var atRoot = true
             for part in url.deletingLastPathComponent().pathComponents where part != "/" {
                 guard part != ".", part != ".." else { throw MemoryPersistenceError.invalidPath }
-                let next = openat(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-                guard next >= 0 else { throw MemoryPersistenceError.insecureDirectory }
+                let next = try Self.openDirectoryComponent(parentFD: fd, name: part, atRoot: atRoot)
                 close(fd)
                 fd = next
+                atRoot = false
             }
             try Self.prepareFreshDirectoryIfNeeded(fd, stateName: name)
         } catch {
@@ -241,6 +244,42 @@ final class LockedMemoryFile: Sendable {
             throw MemoryPersistenceError.ioFailure
         }
         guard fsync(directoryFD) == 0 else { throw MemoryPersistenceError.commitOutcomeUnknown }
+    }
+
+    private static func openDirectoryComponent(parentFD: Int32, name: String, atRoot: Bool) throws -> Int32 {
+        let flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        let direct = openat(parentFD, name, flags)
+        if direct >= 0 { return direct }
+
+        #if canImport(Darwin)
+        // macOS exposes /var, /tmp and /etc as root-owned system aliases into
+        // /private. O_NOFOLLOW therefore returns ENOTDIR for otherwise valid
+        // paths such as FileManager.default.temporaryDirectory. Following any
+        // user-controlled symlink would weaken the store, so the exception is
+        // restricted to these root-level aliases, and both the link and target
+        // must be root-owned.
+        guard atRoot, ["var", "tmp", "etc"].contains(name) else {
+            throw MemoryPersistenceError.insecureDirectory
+        }
+        var linkInfo = stat()
+        guard fstatat(parentFD, name, &linkInfo, AT_SYMLINK_NOFOLLOW) == 0,
+              (linkInfo.st_mode & S_IFMT) == S_IFLNK,
+              linkInfo.st_uid == 0 else {
+            throw MemoryPersistenceError.insecureDirectory
+        }
+        let followed = openat(parentFD, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard followed >= 0 else { throw MemoryPersistenceError.insecureDirectory }
+        var targetInfo = stat()
+        guard fstat(followed, &targetInfo) == 0,
+              (targetInfo.st_mode & S_IFMT) == S_IFDIR,
+              targetInfo.st_uid == 0 else {
+            close(followed)
+            throw MemoryPersistenceError.insecureDirectory
+        }
+        return followed
+        #else
+        throw MemoryPersistenceError.insecureDirectory
+        #endif
     }
 
     /// Foundation does not guarantee that requested POSIX permissions survive
