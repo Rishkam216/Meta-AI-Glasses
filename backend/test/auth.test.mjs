@@ -42,10 +42,15 @@ test('concurrent first login for one external subject resolves to one principal'
   assert.equal(new Set(sessions.map(x=>x.identity.tenantID)).size,1);
 });
 
-test('agent_auth cannot mint arbitrary internal principals or read private identity tables',async()=>{
-  const digest=randomBytes(32);
+test('only agent_auth can invoke external session minting and cannot choose arbitrary internal principals',async()=>{
+  const digest=randomBytes(32), identity=external();
   await assert.rejects(db.auth.transaction(tx=>tx.query(
     "SELECT agent_private.issue_session(gen_random_uuid(),gen_random_uuid(),NULL,$1::bytea,now()+interval '1 hour')",[digest])),code('42501'));
+  await assert.rejects(db.auth.transaction(tx=>tx.query(
+    'SELECT agent_private.resolve_external_principal($1,$2,$3)',[identity.provider,identity.issuer,identity.subject])),code('42501'));
+  const mint="SELECT agent_private.issue_external_session($1,$2,$3,$4::bytea,now()+interval '1 hour')";
+  await assert.rejects(db.runtime.transaction(tx=>tx.query(mint,[identity.provider,identity.issuer,identity.subject,digest])),code('42501'));
+  await assert.rejects(db.writer.transaction(tx=>tx.query(mint,[identity.provider,identity.issuer,identity.subject,digest])),code('42501'));
   for(const sql of ['SELECT * FROM agent_private.external_identities','SELECT * FROM agent_private.principals','SELECT * FROM agent_private.sessions'])
     await assert.rejects(db.auth.transaction(tx=>tx.query(sql)),code('42501'));
 });
