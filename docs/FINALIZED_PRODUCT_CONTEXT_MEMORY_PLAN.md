@@ -15,7 +15,7 @@ The product is a personal agent platform. The agent is the product; models, inte
 
 # 0. Current implementation checkpoint
 
-## Realtime response bounds
+## Realtime response bounds — implementation validated
 
 Branch: `core/realtime-response-bounds`, based on PR #20 merge `807522f`.
 This slice bounds coordinator event/text accumulation and OpenAI wire frame/byte
@@ -23,8 +23,10 @@ processing, including duplicates and ignored frames. Budgets span tool-result
 continuations and reset only for a genuine new user turn. Exhaustion closes the
 session; it does not trigger a retry or roll back an already-started action.
 See `docs/REALTIME_RESPONSE_BOUNDS.md` for exact limits and required merge gates.
-The PR records the tested commit and CI results. No paid calls are made by this
-implementation task, and these local limits are not a precise billing cap.
+PR #21 implementation `2bd05fa` passed native workflow `36309434676` with
+**270 Swift tests**, both canary builds and app verification. Portable
+`36309434705` and backend `36309434665` passed. No paid calls were made by this
+implementation task; these local limits are not a precise billing cap.
 
 ## Realtime cancellation and connection cleanup — implementation validated
 
@@ -66,9 +68,15 @@ exact manual command, evidence distinctions, and session stopping point.
 
 Latest validated implementation:
 
+- PR #21: realtime response event, text and wire bounds.
+- Implementation head: `2bd05fa041a90b74516ab073167a1b092af52ba3`.
+- CI and independent source review passed; merge state is recorded in PR #21.
+
+Previous validated and merged implementation:
+
 - PR #20: realtime cancellation and provider startup cleanup.
 - Implementation head: `f5f6a76620040bc2d35b4a1b599735177844eb1c`.
-- CI and independent source review passed; merge state is recorded in PR #20.
+- Merged `main`: `807522fcad0838027ba4a239f62975ce89a0f9ff`; post-merge CI passed.
 
 Immediately preceding merged milestone:
 

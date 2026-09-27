@@ -3,6 +3,11 @@
 This slice adds per-turn receive and accumulation limits to the realtime path.
 Its baseline is PR #20 merge `807522f`. It does not make paid provider calls.
 
+Validated implementation: PR #21, `2bd05fa041a90b74516ab073167a1b092af52ba3`.
+Native workflow `36309434676` passed **270 Swift tests**, both canary builds and
+native app verification. Portable `36309434705` and backend `36309434665` passed.
+Source changes received independent cross-review. No paid calls were made.
+
 ## Limits
 
 | Boundary | Per-turn maximum | Accounting |
