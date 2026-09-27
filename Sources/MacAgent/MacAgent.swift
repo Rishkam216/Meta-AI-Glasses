@@ -350,6 +350,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if let protocolError = error as? RealtimeProtocolError {
             switch protocolError {
+            case .providerEventLimitExceeded, .assistantTextLimitExceeded:
+                return "The response exceeded this turn's limit. Start a new turn."
             case .providerClosed:
                 return "The realtime connection closed before the turn finished."
             case .providerFailure(let code):
