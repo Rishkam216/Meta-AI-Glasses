@@ -98,8 +98,21 @@ public struct OpenAIRealtimeProvider: RealtimeModelProvider, Sendable {
             model: model,
             transport: transportFactory()
         )
-        try await session.start(request: request)
-        return session
+        return try await withTaskCancellationHandler {
+            do {
+                try await session.start(request: request)
+                try Task.checkCancellation()
+                return session
+            } catch {
+                await session.close()
+                if Task.isCancelled { throw CancellationError() }
+                throw error
+            }
+        } onCancel: {
+            // A suspended transport need not cooperate with Task cancellation.
+            // Close it explicitly so startup can unwind without leaking a socket.
+            Task { await session.close() }
+        }
     }
 
     private static func validModel(_ model: String) -> Bool {
@@ -152,25 +165,37 @@ actor OpenAIRealtimeModelSession: RealtimeModelSession {
         guard !started, !closed else {
             throw OpenAIRealtimeError.invalidState
         }
-        try await transport.connect(request)
+        do {
+            try Task.checkCancellation()
+            try await transport.connect(request)
+            try Task.checkCancellation()
 
-        for _ in 0..<OpenAIRealtimeLimits.maxHandshakeEvents {
-            guard let text = try await receiveWithTimeout() else {
-                throw OpenAIRealtimeError.handshakeFailed
+            for _ in 0..<OpenAIRealtimeLimits.maxHandshakeEvents {
+                guard let text = try await receiveWithTimeout() else {
+                    throw OpenAIRealtimeError.handshakeFailed
+                }
+                try Task.checkCancellation()
+                guard !closed else { throw OpenAIRealtimeError.invalidState }
+                let object = try decodeObject(text)
+                guard let type = object.string("type") else {
+                    throw OpenAIRealtimeError.invalidResponse
+                }
+                if type == "session.created" {
+                    started = true
+                    return
+                }
+                if type == "error" {
+                    throw OpenAIRealtimeError.providerFailure(Self.providerCode(from: object))
+                }
             }
-            let object = try decodeObject(text)
-            guard let type = object.string("type") else {
-                throw OpenAIRealtimeError.invalidResponse
-            }
-            if type == "session.created" {
-                started = true
-                return
-            }
-            if type == "error" {
-                throw OpenAIRealtimeError.providerFailure(Self.providerCode(from: object))
-            }
+            throw OpenAIRealtimeError.handshakeFailed
+        } catch {
+            // Close even when a concurrent cancellation already marked this
+            // session closed: connect may have completed after that close.
+            await transport.close()
+            if Task.isCancelled { throw CancellationError() }
+            throw error
         }
-        throw OpenAIRealtimeError.handshakeFailed
     }
 
     func send(_ event: RealtimeClientEvent) async throws {
@@ -404,11 +429,21 @@ actor OpenAIRealtimeModelSession: RealtimeModelSession {
                 try await Task.sleep(nanoseconds: OpenAIRealtimeLimits.handshakeTimeoutNanoseconds)
                 throw OpenAIRealtimeError.handshakeTimeout
             }
-            guard let first = try await group.next() else {
-                throw OpenAIRealtimeError.handshakeFailed
+            defer { group.cancelAll() }
+            do {
+                guard let first = try await group.next() else {
+                    throw OpenAIRealtimeError.handshakeFailed
+                }
+                try Task.checkCancellation()
+                return first
+            } catch {
+                // Task groups await all children on exit. Close before leaving
+                // the group so a receive that ignores cancellation can finish.
+                group.cancelAll()
+                await transport.close()
+                if Task.isCancelled { throw CancellationError() }
+                throw error
             }
-            group.cancelAll()
-            return first
         }
     }
 

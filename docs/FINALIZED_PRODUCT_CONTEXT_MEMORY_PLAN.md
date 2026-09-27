@@ -3,7 +3,7 @@
 Status: **Design locked. Implementation is active. Follow this document unless an explicit later architecture decision supersedes it.**
 
 Originally finalized: 2026-09-23  
-Current implementation checkpoint: **2026-09-26**
+Current implementation checkpoint: **2026-09-27**
 
 This document is the master implementation checklist and source of truth for the Personal Agent / Glasses Agent architecture.
 
@@ -15,7 +15,21 @@ The product is a personal agent platform. The agent is the product; models, inte
 
 # 0. Current implementation checkpoint
 
-## Active bounded milestone — Calculator execution validation
+## Realtime cancellation and connection cleanup — implementation validated
+
+Branch: `core/realtime-cancellation`, based on PR #19 merge `5310f7f`.
+This slice prevents a cancelled realtime turn from executing after delayed local
+approval, scopes cancellation to the active session/turn, and closes failed or
+cancelled provider startup. It does not add retries, reconnect/resume, voice,
+production deployment, or a shipping Stop-button/approval-dialog UX.
+
+PR #20 implementation `f5f6a76` and independent source review are complete.
+Native workflow `36293794592` passed **257 Swift tests**, both canary builds and
+app-bundle verification. Portable `36293794741` and backend `36293794672` passed.
+No paid calls were made. See
+`docs/REALTIME_CANCELLATION.md` for the behavior and validation boundary.
+
+## Calculator execution validation — merged, live Mac gate pending
 
 Branch: `core/calculator-execution-validation`, based on `805c7f0`.
 The baseline's Backend, Portable core, and macOS workflows were freshly confirmed
@@ -36,17 +50,27 @@ interpret an injected OS launcher in automated tests as real Mac execution.
 See `docs/CALCULATOR_EXECUTION_VALIDATION.md` for the cost bounds, prerequisites,
 exact manual command, evidence distinctions, and session stopping point.
 
-## Current `main`
+## Repository milestones
 
-Latest merged milestone:
+Latest validated implementation:
 
-- PR #18: **Bounded OpenAI Realtime live canary**.
-- Merged `main` commit: `b41ac966780f3c5f5cbe18703f80a16e062404e3`.
-- Validated canary branch head: `413c9ae391e626361a205c67480b2fc785f96830`.
-- Successful paid-network canary commit: `f1c12c59a21143b8109ca0a127fd41056c2185ba`.
+- PR #20: realtime cancellation and provider startup cleanup.
+- Implementation head: `f5f6a76620040bc2d35b4a1b599735177844eb1c`.
+- CI and independent source review passed; merge state is recorded in PR #20.
+
+Immediately preceding merged milestone:
+
+- PR #19: **Bounded Calculator execution validation**.
+- Merged `main` commit: `5310f7f061bdd2c37981f7c91e610f304970b276`.
+- Validated feature/documentation head: `40d390e073749283069886d4a0bac56fc096490e`.
+- Both push and PR gates passed: backend, portable core, native macOS tests/builds.
+- Native suite: 243 passing tests, including five stitched Calculator safety cases.
+- No paid provider call or real Mac launch was performed for PR #19.
 
 Immediately preceding merged milestones:
 
+- PR #18: bounded live OpenAI text canary; successful paid-network commit
+  `f1c12c59a21143b8109ca0a127fd41056c2185ba`.
 - PR #17: Realtime orchestrator and native Mac control.
 - PR #16: canonical Memory → Context Compiler integration.
 - PR #15: provider-neutral Supabase authentication foundation.

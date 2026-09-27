@@ -44,8 +44,11 @@ public struct LocalApprovalBroker: RealtimeApprovalProviding {
     }
 
     public func requestApproval(_ request: RealtimeApprovalRequest) async throws -> UUID? {
+        try Task.checkCancellation()
         guard request.descriptor.risk != .read else { return nil }
-        guard await confirm(request) else { return nil }
+        let confirmed = await confirm(request)
+        try Task.checkCancellation()
+        guard confirmed else { return nil }
         let grant = try await approvals.issue(
             descriptor: request.descriptor,
             arguments: request.arguments,

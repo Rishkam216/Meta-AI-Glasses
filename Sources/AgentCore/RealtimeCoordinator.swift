@@ -13,6 +13,7 @@ public struct RealtimeCoordinator: Sendable {
     private let orchestrator: AgentOrchestrator
     private let approvalProvider: (any RealtimeApprovalProviding)?
     private let capabilities: any AgentCapabilityResolving
+    private let lifecycle = RealtimeTurnLifecycle()
 
     public init(orchestrator: AgentOrchestrator,
                 approvalProvider: (any RealtimeApprovalProviding)? = nil,
@@ -25,6 +26,28 @@ public struct RealtimeCoordinator: Sendable {
     public func runTurn(_ request: RealtimeTurnRequest,
                         in invocation: AgentInvocationContext,
                         using session: any RealtimeModelSession) async throws -> RealtimeTurnResult {
+        try Task.checkCancellation()
+        let handle = try lifecycle.start(sessionID: session.id, turnID: request.id) {
+            try await self.runActiveTurn(request, in: invocation, using: session)
+        }
+        return try await withTaskCancellationHandler {
+            do {
+                let result = try await handle.task.value
+                await lifecycle.finish(sessionID: session.id, generation: handle.generation)
+                try Task.checkCancellation()
+                return result
+            } catch {
+                await lifecycle.finish(sessionID: session.id, generation: handle.generation)
+                throw error
+            }
+        } onCancel: {
+            lifecycle.cancel(turnID: request.id, session: session, generation: handle.generation)
+        }
+    }
+
+    private func runActiveTurn(_ request: RealtimeTurnRequest,
+                               in invocation: AgentInvocationContext,
+                               using session: any RealtimeModelSession) async throws -> RealtimeTurnResult {
         let deviceID = request.explicitDeviceID ?? invocation.session.activeDeviceID
         var additionalScopes: Set<ContextScope> = []
         if let deviceID {
@@ -65,11 +88,13 @@ public struct RealtimeCoordinator: Sendable {
         }
         let allowedCapabilities = Set(capabilityCatalog.map(\.name))
 
+        try Task.checkCancellation()
         try await session.send(.turnContext(RealtimeTurnContext(
             turnID: request.id,
             context: compiled,
             capabilities: capabilityCatalog
         )))
+        try Task.checkCancellation()
         try await session.send(.userText(try RealtimeUserText(
             turnID: request.id,
             text: request.text
@@ -79,7 +104,9 @@ public struct RealtimeCoordinator: Sendable {
         var seenAssistantEvents: Set<UUID> = []
         var processedTools: [UUID: ProcessedToolEvent] = [:]
 
-        while let event = try await session.nextEvent() {
+        while true {
+            try Task.checkCancellation()
+            guard let event = try await session.nextEvent() else { break }
             try Task.checkCancellation()
 
             switch event {
@@ -129,6 +156,7 @@ public struct RealtimeCoordinator: Sendable {
                     arguments: toolIntent.arguments,
                     result: providerResult
                 )
+                try Task.checkCancellation()
                 try await session.send(.toolResult(providerResult))
 
             case .turnCompleted(let completed):
@@ -159,6 +187,11 @@ public struct RealtimeCoordinator: Sendable {
 
     public func cancel(turnID: UUID,
                        using session: any RealtimeModelSession) async {
+        // Cancel locally and schedule close before awaiting remote cancellation.
+        // Already-dispatched native effects cannot be undone. A confirmation UI
+        // that ignores cancellation can delay return, but cannot authorize a
+        // subsequent execution once its suspended confirmation resumes.
+        lifecycle.cancel(turnID: turnID, session: session)
         await session.cancel(turnID: turnID)
     }
 
@@ -228,13 +261,17 @@ public struct RealtimeCoordinator: Sendable {
                 }
             }
 
-            return try await orchestrator.execute(
+            try Task.checkCancellation()
+            let result = try await orchestrator.execute(
                 prepared,
                 approvalID: approvalID
             )
+            try Task.checkCancellation()
+            return result
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            try Task.checkCancellation()
             return providerCapabilityFailure(
                 intent,
                 code: .unavailable,
