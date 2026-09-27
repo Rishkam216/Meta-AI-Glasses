@@ -16,6 +16,8 @@ public enum OpenAIRealtimeError: Error, Sendable, Equatable {
 
 enum OpenAIRealtimeLimits {
     static let maxInboundBytes = 1 * 1_024 * 1_024
+    static let maxWireEventsPerTurn = 512
+    static let maxWireBytesPerTurn = 4 * 1_024 * 1_024
     static let maxCredentialBytes = 8 * 1_024
     static let maxModelBytes = 128
     static let maxHandshakeEvents = 16
@@ -152,6 +154,8 @@ actor OpenAIRealtimeModelSession: RealtimeModelSession {
     private var callIDByPortableEventID: [UUID: String] = [:]
     private var portableEventIDByProviderKey: [String: UUID] = [:]
     private var responsesWithToolCalls: Set<String> = []
+    private var wireEventsThisTurn = 0
+    private var wireBytesThisTurn = 0
 
     init(id: UUID,
          model: String,
@@ -213,10 +217,17 @@ actor OpenAIRealtimeModelSession: RealtimeModelSession {
         case .userText(let userText):
             guard let context = turnContext,
                   context.turnID == userText.turnID,
-                  activeTurnID == nil || activeTurnID == userText.turnID else {
+                  activeTurnID == nil else {
                 throw OpenAIRealtimeError.invalidState
             }
             activeTurnID = userText.turnID
+            // Only a new turn receives a fresh budget. Repeated userText during
+            // an active turn is rejected; tool-result continuations share it.
+            wireEventsThisTurn = 0
+            wireBytesThisTurn = 0
+            callIDByPortableEventID.removeAll(keepingCapacity: true)
+            portableEventIDByProviderKey.removeAll(keepingCapacity: true)
+            responsesWithToolCalls.removeAll(keepingCapacity: true)
             semanticByWireTool = try Self.toolMap(for: context.capabilities)
             try await sendJSON(.object([
                 "type": .string("conversation.item.create"),
@@ -267,7 +278,26 @@ actor OpenAIRealtimeModelSession: RealtimeModelSession {
             throw OpenAIRealtimeError.invalidState
         }
 
-        while let text = try await transport.receive() {
+        while true {
+            // Exhaustion must fail before another receive, including when the
+            // provider sends exactly the limit then leaves the socket idle.
+            guard wireEventsThisTurn < OpenAIRealtimeLimits.maxWireEventsPerTurn,
+                  wireBytesThisTurn < OpenAIRealtimeLimits.maxWireBytesPerTurn else {
+                await close()
+                throw OpenAIRealtimeError.responseTooLarge
+            }
+            guard let text = try await transport.receive() else { break }
+            // Count every frame before parsing, including ignored events and
+            // duplicate IDs that may never become portable provider events.
+            let byteCount = text.utf8.count
+            guard byteCount <= OpenAIRealtimeLimits.maxInboundBytes,
+                  wireEventsThisTurn < OpenAIRealtimeLimits.maxWireEventsPerTurn,
+                  byteCount <= OpenAIRealtimeLimits.maxWireBytesPerTurn - wireBytesThisTurn else {
+                await close()
+                throw OpenAIRealtimeError.responseTooLarge
+            }
+            wireEventsThisTurn += 1
+            wireBytesThisTurn += byteCount
             let object = try decodeObject(text)
             guard let type = object.string("type") else {
                 throw OpenAIRealtimeError.invalidResponse
@@ -329,6 +359,9 @@ actor OpenAIRealtimeModelSession: RealtimeModelSession {
                 activeTurnID = nil
                 turnContext = nil
                 semanticByWireTool.removeAll(keepingCapacity: true)
+                callIDByPortableEventID.removeAll(keepingCapacity: true)
+                portableEventIDByProviderKey.removeAll(keepingCapacity: true)
+                responsesWithToolCalls.removeAll(keepingCapacity: true)
                 return .turnCompleted(RealtimeTurnCompleted(turnID: turnID))
 
             case "error":

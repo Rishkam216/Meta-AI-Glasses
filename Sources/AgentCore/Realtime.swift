@@ -13,6 +13,8 @@ public enum RealtimeProtocolError: Error, Sendable, Equatable {
     case wrongTurn
     case duplicateEventMismatch
     case toolCallLimitExceeded
+    case providerEventLimitExceeded
+    case assistantTextLimitExceeded
     case providerFailure(String)
 }
 
@@ -21,6 +23,8 @@ public enum RealtimeLimits {
     public static let maxToolArgumentBytes = 256 * 1_024
     public static let maxToolCallsPerTurn = 8
     public static let maxCapabilities = 32
+    public static let maxProviderEventsPerTurn = 256
+    public static let maxAssistantTextBytesPerTurn = 64 * 1_024
 }
 
 /// Trusted application-origin turn request. Identity is intentionally absent:

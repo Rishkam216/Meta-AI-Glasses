@@ -103,18 +103,35 @@ public struct RealtimeCoordinator: Sendable {
         var assistantText: [String] = []
         var seenAssistantEvents: Set<UUID> = []
         var processedTools: [UUID: ProcessedToolEvent] = [:]
+        var providerEventCount = 0
+        var assistantTextBytes = 0
 
         while true {
             try Task.checkCancellation()
+            // Count every surfaced event, including duplicates and completion,
+            // before it can trigger another execution or provider continuation.
+            // Stop at exhaustion without waiting for an additional event.
+            guard providerEventCount < RealtimeLimits.maxProviderEventsPerTurn else {
+                await session.close()
+                throw RealtimeProtocolError.providerEventLimitExceeded
+            }
             guard let event = try await session.nextEvent() else { break }
             try Task.checkCancellation()
+            providerEventCount += 1
 
             switch event {
             case .assistantText(let message):
                 guard message.turnID == request.id else {
                     throw RealtimeProtocolError.wrongTurn
                 }
-                if seenAssistantEvents.insert(message.eventID).inserted {
+                if !seenAssistantEvents.contains(message.eventID) {
+                    let bytes = message.text.utf8.count
+                    guard bytes <= RealtimeLimits.maxAssistantTextBytesPerTurn - assistantTextBytes else {
+                        await session.close()
+                        throw RealtimeProtocolError.assistantTextLimitExceeded
+                    }
+                    assistantTextBytes += bytes
+                    seenAssistantEvents.insert(message.eventID)
                     assistantText.append(message.text)
                 }
 

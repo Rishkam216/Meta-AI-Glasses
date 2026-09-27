@@ -15,6 +15,17 @@ The product is a personal agent platform. The agent is the product; models, inte
 
 # 0. Current implementation checkpoint
 
+## Realtime response bounds
+
+Branch: `core/realtime-response-bounds`, based on PR #20 merge `807522f`.
+This slice bounds coordinator event/text accumulation and OpenAI wire frame/byte
+processing, including duplicates and ignored frames. Budgets span tool-result
+continuations and reset only for a genuine new user turn. Exhaustion closes the
+session; it does not trigger a retry or roll back an already-started action.
+See `docs/REALTIME_RESPONSE_BOUNDS.md` for exact limits and required merge gates.
+The PR records the tested commit and CI results. No paid calls are made by this
+implementation task, and these local limits are not a precise billing cap.
+
 ## Realtime cancellation and connection cleanup — implementation validated
 
 Branch: `core/realtime-cancellation`, based on PR #19 merge `5310f7f`.
@@ -26,7 +37,8 @@ production deployment, or a shipping Stop-button/approval-dialog UX.
 PR #20 implementation `f5f6a76` and independent source review are complete.
 Native workflow `36293794592` passed **257 Swift tests**, both canary builds and
 app-bundle verification. Portable `36293794741` and backend `36293794672` passed.
-No paid calls were made. See
+PR #20 is merged at `807522fcad0838027ba4a239f62975ce89a0f9ff`, and all three
+post-merge main workflows passed. No paid calls were made. See
 `docs/REALTIME_CANCELLATION.md` for the behavior and validation boundary.
 
 ## Calculator execution validation — merged, live Mac gate pending
