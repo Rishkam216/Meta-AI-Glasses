@@ -15,7 +15,7 @@ The product is a personal agent platform. The agent is the product; models, inte
 
 # 0. Current implementation checkpoint
 
-## Active bounded milestone — realtime cancellation and connection cleanup
+## Realtime cancellation and connection cleanup — implementation validated
 
 Branch: `core/realtime-cancellation`, based on PR #19 merge `5310f7f`.
 This slice prevents a cancelled realtime turn from executing after delayed local
@@ -23,7 +23,10 @@ approval, scopes cancellation to the active session/turn, and closes failed or
 cancelled provider startup. It does not add retries, reconnect/resume, voice,
 production deployment, or a shipping Stop-button/approval-dialog UX.
 
-Implementation and independent source review complete; **CI pending**. See
+PR #20 implementation `f5f6a76` and independent source review are complete.
+Native workflow `36293794592` passed **257 Swift tests**, both canary builds and
+app-bundle verification. Portable `36293794741` and backend `36293794672` passed.
+No paid calls were made. See
 `docs/REALTIME_CANCELLATION.md` for the behavior and validation boundary.
 
 ## Calculator execution validation — merged, live Mac gate pending
@@ -47,9 +50,15 @@ interpret an injected OS launcher in automated tests as real Mac execution.
 See `docs/CALCULATOR_EXECUTION_VALIDATION.md` for the cost bounds, prerequisites,
 exact manual command, evidence distinctions, and session stopping point.
 
-## Current `main`
+## Repository milestones
 
-Latest merged milestone:
+Latest validated implementation:
+
+- PR #20: realtime cancellation and provider startup cleanup.
+- Implementation head: `f5f6a76620040bc2d35b4a1b599735177844eb1c`.
+- CI and independent source review passed; merge state is recorded in PR #20.
+
+Immediately preceding merged milestone:
 
 - PR #19: **Bounded Calculator execution validation**.
 - Merged `main` commit: `5310f7f061bdd2c37981f7c91e610f304970b276`.

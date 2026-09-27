@@ -1,7 +1,13 @@
 # Realtime cancellation and connection cleanup
 
-Status: **Implementation and source review complete; CI pending.**
+Status: **Implementation, independent source review, and CI passed.**
 Baseline: PR #19 merge `5310f7f`. No paid calls are required for this milestone.
+
+PR #20 implementation commit: `f5f6a76620040bc2d35b4a1b599735177844eb1c`.
+Native workflow `36293794592`: **257 Swift tests passed**, both canary executables
+compiled, native app built and verified. Portable `36293794741` and backend
+`36293794672` also passed. The added suite has seven portable cancellation tests
+and seven provider lifecycle tests (eight parameterized cases).
 
 ## Problem
 
@@ -54,9 +60,10 @@ include explicit and caller cancellation, correct session/turn binding, delayed
 approval, overlapping-turn rejection, cleanup, cancelled result suppression, and
 failed/cancelled provider startup transport cleanup.
 
-Native and portable Swift CI remain the validation gates. The existing backend,
-offline canary, canary-build, and app-bundle checks must remain green. This file
-will record the exact implementation commit and results after those gates pass.
+Native/portable Swift, backend (embedded and native PostgreSQL), offline canary,
+canary-build, and app-bundle checks passed on the implementation commit above.
+No live provider, real Mac action, or native approval dialog was exercised by
+these deterministic tests. No paid calls were made in this milestone.
 
 The real Calculator approval/launch gate from
 `CALCULATOR_EXECUTION_VALIDATION.md` is still pending on the user's Mac.
